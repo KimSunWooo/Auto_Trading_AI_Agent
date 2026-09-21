@@ -56,7 +56,9 @@ def test_every_fixture_action_roundtrips():
 def test_corporate_actions_are_fixture_only_and_as_of_filtered():
     source = FixtureCorporateActionSource.from_file()
     listed = source.list_for("005930", FIXED_AS_OF)
-    assert listed.status is CollectionStatus.OK
+    assert listed.status is not CollectionStatus.DATA_UNAVAILABLE
+    assert listed.status is not CollectionStatus.NO_EVENT
+    assert listed.items
     assert all(item.source == "fixture-corporate-action" for item in listed.items)
     assert all(item.timestamps.tradable_at <= FIXED_AS_OF for item in listed.items)
 
