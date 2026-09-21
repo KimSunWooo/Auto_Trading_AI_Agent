@@ -7,8 +7,8 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from ai_investment_agent.domain.enums import ReasonCode, ShadowSide
 from ai_investment_agent.domain.shadow import ShadowCostModel, ShadowMarketQuote
 
-BPS = Decimal("10000")
-PRICE_TICK = Decimal("1")
+BPS = Decimal(10000)
+PRICE_TICK = Decimal(1)
 
 
 class ShadowCostBreakdown:
@@ -55,7 +55,7 @@ def resolve_friction(
             (Decimal("0.50") - liquidity) / Decimal("0.30")
         )
     slip = model.slippage_bps + extra
-    half_spread = spread / Decimal("2")
+    half_spread = spread / Decimal(2)
     total_bps = half_spread + slip
     if side is ShadowSide.BUY:
         raw = quote.mid * (BPS + total_bps) / BPS
@@ -82,8 +82,8 @@ def resolve_friction(
 
 
 def fee_on(notional: Decimal, model: ShadowCostModel) -> Decimal:
-    return (notional * model.fee_bps / BPS).quantize(Decimal("1"), rounding=ROUND_CEILING)
+    return (notional * model.fee_bps / BPS).quantize(Decimal(1), rounding=ROUND_CEILING)
 
 
 def tax_on_sell(notional: Decimal, model: ShadowCostModel) -> Decimal:
-    return (notional * model.sell_tax_bps / BPS).quantize(Decimal("1"), rounding=ROUND_CEILING)
+    return (notional * model.sell_tax_bps / BPS).quantize(Decimal(1), rounding=ROUND_CEILING)

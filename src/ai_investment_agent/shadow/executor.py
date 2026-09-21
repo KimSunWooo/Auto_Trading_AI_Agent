@@ -97,8 +97,8 @@ class ShadowExecutor:
         ai_capital_limit: Decimal,
         now: datetime,
     ) -> ShadowExecutionResult:
-        intended = (ai_capital_limit * proposal.suggested_capital_pct / Decimal("100")).quantize(
-            Decimal("1")
+        intended = (ai_capital_limit * proposal.suggested_capital_pct / Decimal(100)).quantize(
+            Decimal(1)
         )
         if quote is None or quote.ticker != proposal.ticker:
             order = _order(
@@ -116,7 +116,7 @@ class ShadowExecutor:
                 proposal, ShadowSide.BUY, intended, now, ShadowOrderStatus.REJECTED, reasons
             )
             return ShadowExecutionResult(order=order, portfolio=portfolio)
-        qty = (intended / friction.fill_price).quantize(Decimal("1"), rounding=ROUND_FLOOR)
+        qty = (intended / friction.fill_price).quantize(Decimal(1), rounding=ROUND_FLOOR)
         if qty <= 0:
             order = _order(
                 proposal,
@@ -131,7 +131,7 @@ class ShadowExecutor:
         fee = fee_on(notional, self.cost_model)
         cash_delta = -(notional + fee)
         while qty > 0 and portfolio.cash + cash_delta < 0:
-            qty -= Decimal("1")
+            qty -= Decimal(1)
             notional = qty * friction.fill_price
             fee = fee_on(notional, self.cost_model)
             cash_delta = -(notional + fee)

@@ -47,7 +47,7 @@ FORBIDDEN_METHODS = {
 
 def _quote(
     *,
-    mid: Decimal = Decimal("71000"),
+    mid: Decimal = Decimal(71000),
     spread_bps: Decimal | None = None,
     liquidity_score: Decimal | None = Decimal("0.80"),
     ticker: str = "005930",
@@ -64,7 +64,7 @@ def _quote(
 def _proposal(
     *,
     action: Action = Action.BUY,
-    pct: Decimal = Decimal("5"),
+    pct: Decimal = Decimal(5),
     horizon: Horizon = Horizon.LONG_TERM,
     ticker: str = "005930",
     regime: MarketRegimeType = MarketRegimeType.SIDEWAYS,
@@ -125,7 +125,7 @@ def test_unknown_spread_is_not_zero_and_fill_is_not_mid():
         quote, ShadowSide.BUY, ShadowTradingService().executor.cost_model
     )
     assert friction is not None
-    assert friction.spread_bps == Decimal("10")
+    assert friction.spread_bps == Decimal(10)
     assert friction.fill_price != quote.mid
     assert friction.fill_price > quote.mid
     assert ReasonCode.SHADOW_CONSERVATIVE_SPREAD_DEFAULT.value in reasons
@@ -133,14 +133,14 @@ def test_unknown_spread_is_not_zero_and_fill_is_not_mid():
 
 
 def test_unknown_liquidity_is_conservative_not_perfect():
-    quote = _quote(spread_bps=Decimal("8"), liquidity_score=None)
+    quote = _quote(spread_bps=Decimal(8), liquidity_score=None)
     friction, reasons = resolve_friction(
         quote, ShadowSide.BUY, ShadowTradingService().executor.cost_model
     )
     assert friction is not None
     assert friction.liquidity == Decimal("0.35")
-    assert friction.liquidity < Decimal("1")
-    assert friction.slippage_bps > Decimal("5")
+    assert friction.liquidity < Decimal(1)
+    assert friction.slippage_bps > Decimal(5)
     assert ReasonCode.SHADOW_CONSERVATIVE_LIQUIDITY_DEFAULT.value in reasons
 
 
@@ -225,14 +225,14 @@ def test_wait_hold_and_exit_review_are_skipped_not_sold():
 def test_drawdown_after_mark_to_market():
     service = ShadowTradingService(provided_capital())
     bought, _ = service.executor.apply(
-        _proposal(action=Action.BUY, pct=Decimal("40")),
-        _quote(mid=Decimal("71000")),
+        _proposal(action=Action.BUY, pct=Decimal(40)),
+        _quote(mid=Decimal(71000)),
         service.portfolio,
         ai_capital_limit=service.capital.ai_capital_limit,
         now=AS_OF,
     )
     service.portfolio = bought.portfolio
-    later = _quote(mid=Decimal("50000"))
+    later = _quote(mid=Decimal(50000))
     marked = service.mark_to_market({later.ticker: later}, at=AS_OF)
     assert marked.unrealized_pnl < 0
     assert marked.drawdown > 0
@@ -289,7 +289,7 @@ def test_performance_axes_include_no_trade_long_short_and_regime():
         skip=skip,
     )
     report = service.performance(
-        {"005930": Decimal("69000"), "000660": Decimal("80000")},
+        {"005930": Decimal(69000), "000660": Decimal(80000)},
         now=AS_OF,
     )
     assert report.live_orders_placed == 0
@@ -312,15 +312,15 @@ def test_fill_cannot_equal_mid():
             decision_id=new_decision_id(),
             ticker="005930",
             side=ShadowSide.BUY,
-            quantity=Decimal("1"),
-            mid_price=Decimal("71000"),
-            fill_price=Decimal("71000"),
+            quantity=Decimal(1),
+            mid_price=Decimal(71000),
+            fill_price=Decimal(71000),
             spread_bps_applied=Decimal(0),
             slippage_bps_applied=Decimal(0),
             fee=Decimal(0),
             tax=Decimal(0),
-            notional=Decimal("71000"),
-            cash_delta=Decimal("-71000"),
+            notional=Decimal(71000),
+            cash_delta=Decimal(-71000),
             filled_at=AS_OF,
         )
 
@@ -332,7 +332,7 @@ def test_convertible_to_broker_cannot_be_true():
             decision_id=new_decision_id(),
             ticker="005930",
             side=ShadowSide.BUY,
-            intended_notional=Decimal("1"),
+            intended_notional=Decimal(1),
             submitted_at=AS_OF,
             status=ShadowOrderStatus.SKIPPED,
             convertible_to_broker=True,  # type: ignore[arg-type]
@@ -351,7 +351,7 @@ def test_no_conversion_methods_or_broker_ids():
     for typ in types:
         names = {name for name, member in getmembers(typ) if isfunction(member) or ismethod(member)}
         assert names.isdisjoint(FORBIDDEN_METHODS)
-        assert not any(name.startswith("to_broker") or name.startswith("place_") for name in names)
+        assert not any(name.startswith(("to_broker", "place_")) for name in names)
     files = list(Path("src/ai_investment_agent/shadow").glob("*.py"))
     files.append(Path("src/ai_investment_agent/domain/shadow.py"))
     joined = "\n".join(path.read_text() for path in files)
@@ -366,8 +366,9 @@ def test_no_conversion_methods_or_broker_ids():
         submitted_at=AS_OF,
         status=ShadowOrderStatus.SKIPPED,
     )
-    dumped = order.model_dump()
-    assert dumped["convertible_to_broker"] is False
+    dumped = order.model_dump(mode="json")
+    assert dumped["convertibleToBroker"] is False
+    assert "brokerOrderId" not in dumped
     assert "broker_order_id" not in dumped
 
 

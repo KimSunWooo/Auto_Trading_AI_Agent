@@ -69,8 +69,7 @@ class ShadowTradingService:
         prices = {ticker: quote.mid for ticker, quote in quotes.items()}
         self.portfolio = mark_positions(self.portfolio, prices, at)
         self.tracker.equity_curve.append(self.portfolio.equity)
-        if self.portfolio.drawdown > self.tracker.peak_drawdown:
-            self.tracker.peak_drawdown = self.portfolio.drawdown
+        self.tracker.peak_drawdown = max(self.tracker.peak_drawdown, self.portfolio.drawdown)
         self.tracker.note_mids(prices)
         return self.portfolio
 

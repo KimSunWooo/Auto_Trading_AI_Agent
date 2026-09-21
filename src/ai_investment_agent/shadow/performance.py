@@ -6,6 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from itertools import pairwise
 from math import sqrt
 from statistics import mean, pstdev
 from typing import Literal
@@ -13,7 +14,13 @@ from typing import Literal
 from pydantic import Field
 
 from ai_investment_agent.domain.base import DomainModel
-from ai_investment_agent.domain.enums import Action, EvaluationStatus, Horizon, MarketRegimeType, ShadowSide
+from ai_investment_agent.domain.enums import (
+    Action,
+    EvaluationStatus,
+    Horizon,
+    MarketRegimeType,
+    ShadowSide,
+)
 from ai_investment_agent.domain.shadow import (
     ShadowExecutionResult,
     ShadowFill,
@@ -78,8 +85,7 @@ class ShadowPerformanceTracker:
         realized_pnl_delta: Decimal = Decimal(0),
     ) -> None:
         self.equity_curve.append(result.portfolio.equity)
-        if result.portfolio.drawdown > self.peak_drawdown:
-            self.peak_drawdown = result.portfolio.drawdown
+        self.peak_drawdown = max(self.peak_drawdown, result.portfolio.drawdown)
         if skip is not None:
             self.skips.append(skip)
         fill = result.fill
@@ -214,7 +220,7 @@ def _sharpe(curve: list[Decimal]) -> float | None:
     if len(curve) < 3:
         return None
     rets = []
-    for prev, cur in zip(curve, curve[1:]):
+    for prev, cur in pairwise(curve):
         if prev <= 0:
             continue
         rets.append(float((cur - prev) / prev))

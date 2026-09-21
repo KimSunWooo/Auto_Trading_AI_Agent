@@ -27,13 +27,13 @@ from ai_investment_agent.domain.market import MarketSnapshot
 class ShadowCostModel(DomainModel):
     """Conservative virtual costs. Missing market microstructure is not free."""
 
-    default_spread_bps: Decimal = Field(default=Decimal("10"), ge=0)
-    slippage_bps: Decimal = Field(default=Decimal("5"), ge=0)
-    fee_bps: Decimal = Field(default=Decimal("15"), ge=0)
-    sell_tax_bps: Decimal = Field(default=Decimal("23"), ge=0)
+    default_spread_bps: Decimal = Field(default=Decimal(10), ge=0)
+    slippage_bps: Decimal = Field(default=Decimal(5), ge=0)
+    fee_bps: Decimal = Field(default=Decimal(15), ge=0)
+    sell_tax_bps: Decimal = Field(default=Decimal(23), ge=0)
     min_liquidity_to_fill: Decimal = Field(default=Decimal("0.20"), ge=0, le=1)
     unknown_liquidity_score: Decimal = Field(default=Decimal("0.35"), ge=0, le=1)
-    low_liquidity_extra_slippage_bps: Decimal = Field(default=Decimal("20"), ge=0)
+    low_liquidity_extra_slippage_bps: Decimal = Field(default=Decimal(20), ge=0)
 
 
 class ShadowMarketQuote(DomainModel):
@@ -177,7 +177,7 @@ class ShadowPortfolio(DomainModel):
 
     @property
     def deployed_notional(self) -> Decimal:
-        return sum((item.market_value for item in self.positions), Decimal("0"))
+        return sum((item.market_value for item in self.positions), Decimal(0))
 
 
 class ShadowSkipRecord(DomainModel):

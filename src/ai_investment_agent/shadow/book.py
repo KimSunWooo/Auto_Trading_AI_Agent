@@ -100,7 +100,7 @@ def _revalue(
     if unrealized is None:
         unrealized = sum((item.unrealized_pnl for item in positions), Decimal(0))
     equity = cash + sum((item.market_value for item in positions), Decimal(0))
-    peak = state.peak_equity if state.peak_equity >= equity else equity
+    peak = max(state.peak_equity, equity)
     drawdown = Decimal(0) if peak <= 0 else (peak - equity) / peak
     return state.model_copy(
         update={
