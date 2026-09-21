@@ -35,6 +35,9 @@ class QuantitativeFeatureCalculator:
         ret_5d = window_return(closes, 5)
         ma_short = moving_average(closes, min(cfg.ma_short_window, len(closes))) if closes else None
         ma_long = moving_average(closes, cfg.ma_long_window)
+        ma20 = moving_average(closes, cfg.ma20_window)
+        ma60 = moving_average(closes, cfg.ma60_window)
+        ma120 = moving_average(closes, cfg.ma120_window)
         momentum = None
         if ma_short is not None and ma_long not in (None, 0):
             momentum = ma_short / ma_long - 1.0
@@ -67,6 +70,10 @@ class QuantitativeFeatureCalculator:
             return_5d=to_decimal(ret_5d),
             ma_short=to_decimal(ma_short),
             ma_long=to_decimal(ma_long),
+            ma20=to_decimal(ma20),
+            ma60=to_decimal(ma60),
+            ma120=to_decimal(ma120),
+            weekly_trend=None,
             momentum=to_decimal(momentum),
             volatility=to_decimal(volatility),
             drawdown=to_decimal(drawdown),

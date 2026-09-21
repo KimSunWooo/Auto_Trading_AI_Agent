@@ -9,6 +9,13 @@ from pydantic import Field
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.enums import EventSeverity, MarketRegimeType
 
+UNSAFE_KNOWN_REGIMES = {
+    MarketRegimeType.CRISIS,
+    MarketRegimeType.EVENT_RISK,
+    MarketRegimeType.LOW_LIQUIDITY,
+    MarketRegimeType.HIGH_VOLATILITY,
+}
+
 
 class MarketSnapshot(DomainModel):
     ticker: str = Field(min_length=1)
@@ -50,6 +57,10 @@ class MarketRegime(DomainModel):
         return self.regime is MarketRegimeType.UNKNOWN
 
     @property
-    def treated_as_safe(self) -> bool:
-        """UNKNOWN is never normal or safe."""
+    def is_known(self) -> bool:
         return self.regime is not MarketRegimeType.UNKNOWN
+
+    @property
+    def treated_as_safe(self) -> bool:
+        """Known is not the same as safe. CRISIS/EVENT_RISK stay unsafe."""
+        return self.is_known and self.regime not in UNSAFE_KNOWN_REGIMES

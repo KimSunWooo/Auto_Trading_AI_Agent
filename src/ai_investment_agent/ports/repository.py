@@ -1,3 +1,10 @@
+"""Decision persistence port.
+
+Current adapter: InMemoryDecisionRepository.
+A durable PostgreSQL adapter can be added later behind this Protocol.
+It must not share storage with Auto-Trading-system.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

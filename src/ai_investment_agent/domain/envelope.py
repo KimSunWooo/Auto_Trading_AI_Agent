@@ -16,6 +16,7 @@ from ai_investment_agent.domain.base import DomainModel, to_camel
 from ai_investment_agent.domain.enums import (
     Action,
     ConfidenceSource,
+    DataMode,
     EnvelopeArtifactType,
     Horizon,
 )
@@ -84,6 +85,10 @@ class TradeProposalEnvelope(DomainModel):
     is_order: Literal[False] = False
     producer: Literal["ai_investment_agent"] = "ai_investment_agent"
     intended_consumer: Literal["future_auto_trading_system"] = "future_auto_trading_system"
+    data_mode: DataMode = DataMode.FIXTURE
+    analysis_as_of: datetime | None = None
+    valid_until: datetime | None = None
+    context_fingerprint: str | None = None
 
     @model_validator(mode="after")
     def not_an_order_and_known_schema(self) -> TradeProposalEnvelope:
@@ -131,6 +136,10 @@ class TradeProposalEnvelope(DomainModel):
             model_version=proposal.model_version,
             feature_version=proposal.feature_version,
             policy_version=proposal.policy_version,
+            data_mode=proposal.data_mode,
+            analysis_as_of=proposal.analysis_as_of,
+            valid_until=proposal.valid_until,
+            context_fingerprint=proposal.context_fingerprint,
         )
 
     @property

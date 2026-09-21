@@ -55,6 +55,9 @@ class FeaturePolicyConfig:
     low_liquidity_threshold: float = 0.3
     bull_return_threshold: float = 0.02
     bear_return_threshold: float = -0.02
+    ma20_window: int = 20
+    ma60_window: int = 60
+    ma120_window: int = 120
     ma_short_window: int = 5
     ma_long_window: int = 20
     vol_window: int = 10

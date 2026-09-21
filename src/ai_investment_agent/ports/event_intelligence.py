@@ -7,7 +7,12 @@ from ai_investment_agent.domain.event_intelligence import AnalyzedMarketEvent
 
 
 class IntelligenceEventStore(Protocol):
-    """Persists analyzed events. Retraction updates status; it does not delete."""
+    """Persists analyzed events. Retraction updates status; it does not delete.
+
+    Current adapter: InMemoryIntelligenceEventStore.
+    Durable storage is required before a long-running Live Shadow soak.
+    Do not share a database with Auto-Trading-system.
+    """
 
     def upsert(self, event: AnalyzedMarketEvent) -> None:
         ...

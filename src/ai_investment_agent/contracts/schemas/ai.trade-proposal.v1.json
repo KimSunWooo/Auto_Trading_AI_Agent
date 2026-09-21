@@ -134,6 +134,26 @@
     "intendedConsumer": {
       "type": "string",
       "const": "future_auto_trading_system"
+    },
+    "dataMode": {
+      "type": "string",
+      "enum": ["FIXTURE", "REPLAY", "LIVE_OBSERVATION", "LIVE_SHADOW"],
+      "description": "How inputs were produced. Missing mode is never LIVE. Additive optional v1 field."
+    },
+    "analysisAsOf": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Market time this judgment used. Distinct from generatedAt. Additive optional v1 field."
+    },
+    "validUntil": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Judgment-artifact freshness. Not an order TTL. Additive optional v1 field."
+    },
+    "contextFingerprint": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Deterministic hash of the decision context. Additive optional v1 field."
     }
   }
 }

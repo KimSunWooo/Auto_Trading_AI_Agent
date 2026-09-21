@@ -132,6 +132,9 @@ class CollectionResult(DomainModel, Generic[TItem]):
                 raise ValueError("STALE requires the stale items; an empty failure is DATA_UNAVAILABLE")
             if self.error is not None:
                 raise ValueError("STALE is a freshness judgment, not a collector failure")
+        elif self.status is CollectionStatus.DEGRADED:
+            if not self.error:
+                raise ValueError("DEGRADED requires a description of the failed providers")
         return self
 
     @property
@@ -205,6 +208,25 @@ class CollectionResult(DomainModel, Generic[TItem]):
             as_of=as_of,
             freshness_class=freshness_class,
             stale_item_ids=ids,
+        )
+
+    @classmethod
+    def degraded(
+        cls,
+        items: list[TItem],
+        *,
+        error: str,
+        as_of: datetime,
+        freshness_class: FreshnessClass | None = None,
+        stale_item_ids: list[str] | None = None,
+    ) -> CollectionResult[TItem]:
+        return cls(
+            status=CollectionStatus.DEGRADED,
+            items=items,
+            error=error,
+            as_of=as_of,
+            freshness_class=freshness_class,
+            stale_item_ids=stale_item_ids or [],
         )
 
 

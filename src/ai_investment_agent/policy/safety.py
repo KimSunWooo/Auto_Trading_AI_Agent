@@ -12,6 +12,7 @@ from decimal import Decimal
 from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.enums import (
     Action,
+    DataMode,
     Horizon,
     KillSwitchLevel,
     PolicyAction,
@@ -49,7 +50,38 @@ class SafetyPolicyLayer:
         human: HumanOverride | None = None,
         policy_state: PolicyState = PolicyState.NORMAL,
         kill_switch: KillSwitchLevel = KillSwitchLevel.LEVEL_0_NORMAL,
+        data_mode: DataMode = DataMode.FIXTURE,
     ) -> TradeProposal:
+        live_compatible = data_mode in {DataMode.LIVE_OBSERVATION, DataMode.LIVE_SHADOW}
+        if live_compatible and (portfolio is None or risk_budgets is None):
+            missing: list[str] = []
+            if portfolio is None:
+                missing.append(ReasonCode.PORTFOLIO_CONTEXT_MISSING.value)
+            if risk_budgets is None:
+                missing.append(ReasonCode.RISK_BUDGETS_MISSING.value)
+            missing.append(ReasonCode.POLICY_UNKNOWN_NO_NEW_BUY.value)
+            missing.append(ReasonCode.POLICY_NO_TRADE_IS_VALID.value)
+            blocked = _as_wait(proposal) if proposal.action is Action.BUY else proposal
+            result = PolicyResult(
+                policy_state=PolicyState.UNKNOWN,
+                kill_switch_level=kill_switch,
+                action=PolicyAction.DEFER if proposal.action is Action.BUY else PolicyAction.ALLOW,
+                original_suggested_capital_pct=proposal.suggested_capital_pct,
+                applied_suggested_capital_pct=ZERO,
+                reason_codes=_unique(list(proposal.reason_codes) + missing),
+                force_sell_all=False,
+                capital_remaining=ZERO,
+                risk_remaining=ZERO,
+            )
+            return blocked.model_copy(
+                update={
+                    "reason_codes": result.reason_codes,
+                    "policy_result": result,
+                    "suggested_capital_pct": ZERO,
+                    "action": blocked.action,
+                    "horizon": blocked.horizon,
+                }
+            )
         book = portfolio if portfolio is not None else PortfolioContext.fixture_empty()
         if book.source != "fixture":
             raise ValueError("SafetyPolicyLayer accepts fixture PortfolioContext only")

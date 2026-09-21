@@ -50,8 +50,14 @@ TradeProposalEnvelope {
     isOrder                # const: false
     producer               # const: "ai_investment_agent"
     intendedConsumer       # const: "future_auto_trading_system"
+    dataMode                 # optional additive v1: FIXTURE | REPLAY | LIVE_OBSERVATION | LIVE_SHADOW
+    analysisAsOf             # optional additive v1: market time used for the judgment
+    validUntil               # optional additive v1: artifact freshness, not an order TTL
+    contextFingerprint       # optional additive v1: deterministic context hash
 }
 ```
+
+These four fields are **optional additive v1 fields**. `schemaVersion` remains `ai.trade-proposal.v1`. They are not required, so older v1 documents still parse. Missing `dataMode` is never treated as LIVE.
 
 JSON Schema: `src/ai_investment_agent/contracts/schemas/ai.trade-proposal.v1.json`
 
@@ -63,6 +69,7 @@ Pydantic encoder: `TradeProposalEnvelope.from_proposal` / `envelope_from_proposa
 - `NO_TRADE` / `TACTICAL_WAIT`의 `suggestedCapitalPct`는 0입니다.
 - quantity, price, accountId, brokerOrderId 필드는 **존재하지 않습니다.**
 - `isOrder`는 항상 `false`이며 `true`로 설정할 수 없습니다.
+- `dataMode` / `analysisAsOf` / `validUntil` / `contextFingerprint`는 v1 호환 additive optional field입니다. 필드 삭제/rename/타입 변경이 아니므로 schemaVersion을 올리지 않습니다.
 
 Idempotency: Consumer는 `proposalId`가 같으면 동일 판단으로 보고 재처리해도 효과가 같아야 합니다.
 

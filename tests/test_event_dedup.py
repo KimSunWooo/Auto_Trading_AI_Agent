@@ -1,4 +1,4 @@
-from ai_investment_agent.domain.enums import EventCategory, EventDirection, VerificationStatus
+from ai_investment_agent.domain.enums import EventCategory, VerificationStatus
 from tests.event_support import make_engine, raw_event
 
 

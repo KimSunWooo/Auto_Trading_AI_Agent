@@ -143,6 +143,7 @@ class ShadowPortfolio(DomainModel):
     """AI-only virtual account. Cash starts at aiCapitalLimit, not totalCapital."""
 
     initial_capital: Decimal = Field(ge=0)
+    reference_total_capital: Decimal | None = Field(default=None, ge=0)
     ai_capital_limit: Decimal = Field(ge=0)
     cash: Decimal = Field(ge=0)
     positions: list[ShadowPosition] = Field(default_factory=list)
@@ -158,7 +159,8 @@ class ShadowPortfolio(DomainModel):
     def opened(cls, capital: CapitalContext) -> ShadowPortfolio:
         cash = capital.ai_capital_limit
         return cls(
-            initial_capital=capital.total_capital,
+            initial_capital=capital.ai_capital_limit,
+            reference_total_capital=capital.total_capital,
             ai_capital_limit=capital.ai_capital_limit,
             cash=cash,
             positions=[],

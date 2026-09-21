@@ -74,6 +74,8 @@ def test_analysis_api_evaluate_list_get_replay_and_health():
     assert payload["ordersEnabled"] is False
     assert payload["brokerConnected"] is False
     assert payload["autoTradingSystemConnected"] is False
+    assert payload["runtimeProfile"] == "FIXTURE"
+    assert payload["dataMode"] == "FIXTURE"
     names = {item["name"] for item in payload["components"]}
     assert names == {
         "MarketDataHealth",
@@ -88,6 +90,8 @@ def test_analysis_api_evaluate_list_get_replay_and_health():
     assert payload["marketDataHealth"]["name"] == "MarketDataHealth"
     root = client.get("/")
     assert root.json()["ordersEnabled"] is False
+    assert root.json()["runtimeProfile"] == "FIXTURE"
+    assert root.json()["dataMode"] == "FIXTURE"
 
 
 def test_order_and_broker_routes_do_not_exist():

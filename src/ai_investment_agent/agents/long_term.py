@@ -157,6 +157,7 @@ def _confidence(features: LongTermFeatures, missing: list[str]) -> float:
         "ma120",
         "sector_strength",
         "long_horizon_event_bias",
+        "weekly_trend",
     }
     required_missing = [name for name in missing if name not in optional]
     penalty = 0.08 * len(required_missing) + 0.03 * len([name for name in missing if name in optional])

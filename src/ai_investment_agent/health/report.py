@@ -9,7 +9,7 @@ from pydantic import Field
 from ai_investment_agent.analysis.service import AnalysisService
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.collection import CollectionResult
-from ai_investment_agent.domain.enums import CollectionStatus, ModelHealthStatus
+from ai_investment_agent.domain.enums import CollectionStatus, DataMode, ModelHealthStatus
 from ai_investment_agent.domain.evaluation import ModelHealthMetrics
 
 
@@ -30,6 +30,8 @@ class ServiceHealthReport(DomainModel):
     orders_enabled: Literal[False] = False
     broker_connected: Literal[False] = False
     auto_trading_system_connected: Literal[False] = False
+    runtime_profile: str = DataMode.FIXTURE.value
+    data_mode: str = DataMode.FIXTURE.value
     terminal_artifact: str = "TradeProposal"
     mode: str = "judgment_only"
     components: list[ComponentHealth] = Field(default_factory=list)
@@ -106,6 +108,8 @@ def collect_health(service: AnalysisService) -> ServiceHealthReport:
         database_health=database_component,
         event_pipeline_health=pipeline_component,
         components=components,
+        runtime_profile=service.runtime.data_mode.value,
+        data_mode=service.runtime.data_mode.value,
     )
 
 
@@ -126,7 +130,7 @@ def aggregate_status(statuses: list[ModelHealthStatus]) -> ModelHealthStatus:
 def _from_collection(status: CollectionStatus) -> ModelHealthStatus:
     if status is CollectionStatus.OK or status is CollectionStatus.NO_EVENT:
         return ModelHealthStatus.HEALTHY
-    if status is CollectionStatus.STALE:
+    if status is CollectionStatus.STALE or status is CollectionStatus.DEGRADED:
         return ModelHealthStatus.DEGRADED
     if status is CollectionStatus.DATA_UNAVAILABLE:
         return ModelHealthStatus.UNHEALTHY

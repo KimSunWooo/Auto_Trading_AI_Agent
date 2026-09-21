@@ -19,10 +19,11 @@ from ai_investment_agent.domain.agent_views import (
     ShortTermFeatures,
 )
 from ai_investment_agent.domain.capital import CapitalContext
-from ai_investment_agent.domain.confidence import CalibrationTable
+from ai_investment_agent.domain.confidence import CalibrationTable, compose_confidence
 from ai_investment_agent.domain.context import MarketContext
 from ai_investment_agent.domain.decision import DecisionSnapshot
 from ai_investment_agent.domain.enums import (
+    DataMode,
     DecisionType,
     EntryTiming,
     Horizon,
@@ -31,11 +32,14 @@ from ai_investment_agent.domain.enums import (
     KillSwitchLevel,
     PositionThesisStatus,
     PolicyState,
+    ReasonCode,
     Stance,
 )
+from ai_investment_agent.domain.fingerprint import context_fingerprint
 from ai_investment_agent.domain.ids import new_decision_id
 from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketSnapshot
 from ai_investment_agent.domain.policy import HumanOverride, PortfolioContext, RiskBudgets
+from ai_investment_agent.domain.runtime import DecisionReadiness
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
 from ai_investment_agent.domain.versions import PROMPT_VERSION
 from ai_investment_agent.horizon.selector import HorizonSelector
@@ -64,6 +68,8 @@ class InvestmentJudgmentRequest:
     kill_switch_level: KillSwitchLevel = KillSwitchLevel.LEVEL_0_NORMAL
     feature_snapshot: MarketContext | None = None
     events: tuple[MarketEvent, ...] = ()
+    data_mode: DataMode = DataMode.FIXTURE
+    readiness: DecisionReadiness | None = None
 
 
 class InvestmentJudgmentAgent:
@@ -124,6 +130,25 @@ class InvestmentJudgmentAgent:
         }:
             selected = selected.model_copy(update={"choice": HorizonChoice.TACTICAL_WAIT})
 
+        readiness = request.readiness
+        live_compatible = request.data_mode in {
+            DataMode.LIVE_OBSERVATION,
+            DataMode.LIVE_SHADOW,
+        }
+        if readiness is not None and not readiness.allows_new_buy:
+            selected = _block_new_buy(
+                selected,
+                list(readiness.reason_codes) or [ReasonCode.DECISION_READINESS_BLOCKED.value],
+            )
+        elif readiness is None and live_compatible:
+            selected = _block_new_buy(
+                selected,
+                [
+                    ReasonCode.DECISION_READINESS_BLOCKED.value,
+                    ReasonCode.POLICY_UNKNOWN_NO_NEW_BUY.value,
+                ],
+            )
+
         desired = _desired(selected, position_status)
         thesis = _thesis(request.ticker, long_view, short_view, selected)
         conditions = [
@@ -131,7 +156,24 @@ class InvestmentJudgmentAgent:
             for code in thesis.invalidations
         ]
         capital = self._capital.resolve(request.capital_context)
-        raw_confidence = min(long_view.confidence, short_view.confidence)
+        event_uncertainty = 0.0
+        if request.feature_snapshot is not None:
+            event_uncertainty = 1.0 - request.feature_snapshot.event_features.event_confidence
+        assessment = compose_confidence(
+            selected_choice=selected.choice,
+            long_view=long_view,
+            short_view=short_view,
+            data_quality=float(request.snapshot.data_completeness),
+            market_regime_confidence=request.regime.confidence,
+            event_uncertainty=event_uncertainty,
+        )
+        fingerprint = context_fingerprint(
+            ticker=request.ticker,
+            analysis_as_of=request.snapshot.as_of,
+            event_ids=[event.event_id for event in request.events],
+            last_price=request.snapshot.last_price,
+            data_mode=request.data_mode,
+        )
         output = self._engine.decide(
             DecisionInput(
                 decision_id=decision_id,
@@ -141,13 +183,18 @@ class InvestmentJudgmentAgent:
                 capital=capital,
                 thesis=thesis,
                 desired_decision=desired,
-                raw_confidence=raw_confidence,
+                raw_confidence=assessment.raw_confidence,
                 desired_capital_pct=Decimal("5") if desired in {
                     DecisionType.LONG_TERM_BUY,
                     DecisionType.SHORT_TERM_BUY,
                 } else Decimal("0"),
                 generated_at=now,
                 invalidation_conditions=tuple(conditions),
+                long_assessment=long_view,
+                short_assessment=short_view,
+                data_mode=request.data_mode,
+                analysis_as_of=request.snapshot.as_of,
+                context_fingerprint=fingerprint,
             )
         )
         proposal = self._safety.apply(
@@ -158,7 +205,15 @@ class InvestmentJudgmentAgent:
             human=request.human_override,
             policy_state=request.policy_state,
             kill_switch=request.kill_switch_level,
+            data_mode=request.data_mode,
         )
+        if proposal.calibrated_confidence is not None:
+            assessment = assessment.model_copy(
+                update={
+                    "calibrated_confidence": proposal.calibrated_confidence,
+                    "calibration_applied": True,
+                }
+            )
         proposal = proposal.model_copy(
             update={"reason_codes": _unique(proposal.reason_codes + selected.reason_codes)}
         )
@@ -179,6 +234,12 @@ class InvestmentJudgmentAgent:
             selected_horizon=selected.choice,
             feature_snapshot=request.feature_snapshot,
             prompt_version=PROMPT_VERSION,
+            data_mode=request.data_mode,
+            analysis_as_of=request.snapshot.as_of,
+            valid_until=proposal.valid_until,
+            context_fingerprint=fingerprint,
+            readiness=readiness,
+            confidence_assessment=assessment,
         )
         self._repository.save_snapshot(record)
         self._publisher.publish(proposal)
@@ -189,6 +250,19 @@ class InvestmentJudgmentAgent:
             reason_codes=proposal.reason_codes,
         )
         return record
+
+
+def _block_new_buy(selected: HorizonDecision, extra_reasons: list[str]) -> HorizonDecision:
+    if selected.choice not in {HorizonChoice.LONG_TERM, HorizonChoice.SHORT_TERM}:
+        return selected.model_copy(
+            update={"reason_codes": _unique(list(selected.reason_codes) + extra_reasons)}
+        )
+    return selected.model_copy(
+        update={
+            "choice": HorizonChoice.TACTICAL_WAIT,
+            "reason_codes": _unique(list(selected.reason_codes) + extra_reasons),
+        }
+    )
 
 
 def _desired(selected: HorizonDecision, position_status: PositionThesisStatus) -> DecisionType:

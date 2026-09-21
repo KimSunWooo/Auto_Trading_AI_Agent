@@ -23,6 +23,7 @@ def test_high_event_risk_sets_event_risk_regime():
     assert context.event_features.effective_impact >= 0.45
     assert context.event_features.geopolitical_risk >= 0.45
     assert context.regime.regime is MarketRegimeType.EVENT_RISK
-    assert context.regime.treated_as_safe is True  # EVENT_RISK is known, just risky
+    assert context.regime.is_known is True
+    assert context.regime.treated_as_safe is False
     assert context.regime.regime is not MarketRegimeType.UNKNOWN
     assert context.event_features.dominant_category is EventCategory.GEOPOLITICAL

@@ -7,12 +7,14 @@ from pydantic import Field
 from ai_investment_agent.domain.agent_views import AgentAssessment, HorizonDecision
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.capital import CapitalContext
+from ai_investment_agent.domain.confidence import ConfidenceAssessment
 from ai_investment_agent.domain.context import MarketContext
-from ai_investment_agent.domain.enums import Action, AgentPriority, HorizonChoice
+from ai_investment_agent.domain.enums import Action, AgentPriority, DataMode, HorizonChoice
 from ai_investment_agent.domain.evaluation import CounterfactualOutcome
 from ai_investment_agent.domain.journal import DecisionRecord
 from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketSnapshot
 from ai_investment_agent.domain.proposal import TradeProposal
+from ai_investment_agent.domain.runtime import DecisionReadiness, ProviderStatus
 from ai_investment_agent.domain.thesis import InvestmentThesis
 from ai_investment_agent.domain.versions import PROMPT_VERSION
 
@@ -41,6 +43,13 @@ class DecisionSnapshot(DomainModel):
     feature_snapshot: MarketContext | None = None
     prompt_version: str = PROMPT_VERSION
     counterfactual: CounterfactualOutcome = Field(default_factory=CounterfactualOutcome)
+    data_mode: DataMode = DataMode.FIXTURE
+    analysis_as_of: datetime | None = None
+    valid_until: datetime | None = None
+    context_fingerprint: str | None = None
+    readiness: DecisionReadiness | None = None
+    provider_health: list[ProviderStatus] = Field(default_factory=list)
+    confidence_assessment: ConfidenceAssessment | None = None
 
     @property
     def timestamp(self) -> datetime:

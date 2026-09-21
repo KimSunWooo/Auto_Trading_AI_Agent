@@ -14,7 +14,7 @@ from ai_investment_agent.domain.agent_views import AgentAssessment
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.context import MarketContext
-from ai_investment_agent.domain.enums import HorizonChoice
+from ai_investment_agent.domain.enums import DataMode, HorizonChoice
 from ai_investment_agent.domain.errors import DecisionNotFoundError
 from ai_investment_agent.domain.evaluation import CounterfactualOutcome, VersionPin
 from ai_investment_agent.domain.journal import DecisionJournalEntry, DecisionRecord
@@ -45,6 +45,7 @@ class ReplayBundle(DomainModel):
     counterfactual: CounterfactualOutcome = Field(default_factory=CounterfactualOutcome)
     record: DecisionRecord
     deterministic_rerun: bool = False
+    data_mode: DataMode = DataMode.FIXTURE
     restore_note: str = (
         "Recorded inputs and version pins restored. "
         "Live model and market calls are not re-executed."
@@ -78,5 +79,6 @@ class ReplayService:
             journal=list(self._repository.list_journal(decision_id)),
             counterfactual=snapshot.counterfactual,
             record=record,
+            data_mode=snapshot.data_mode,
             deterministic_rerun=False,
         )

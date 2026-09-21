@@ -10,6 +10,7 @@ from ai_investment_agent.domain.enums import (
     VerificationStatus,
 )
 from ai_investment_agent.domain.event_intelligence import AnalyzedMarketEvent
+from ai_investment_agent.domain.event_time import resolve_market_available_at
 from ai_investment_agent.features.engine import MarketContextEngine
 
 AS_OF = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
@@ -41,8 +42,17 @@ def analyzed_event(
     horizon: ImpactHorizon = ImpactHorizon.DAYS,
     tickers: list[str] | None = None,
     analyzed_at: datetime | None = None,
+    published_at: datetime | None = None,
+    collected_at: datetime | None = None,
+    market_available_at: datetime | None = None,
     headline: str = "Fixture event",
 ) -> AnalyzedMarketEvent:
+    at = analyzed_at or AS_OF
+    published = published_at if published_at is not None else at
+    available = market_available_at or resolve_market_available_at(
+        published_at=published,
+        collected_at=collected_at,
+    )
     return AnalyzedMarketEvent(
         event_id=event_id,
         cluster_id="ecl_ctx_1",
@@ -61,7 +71,10 @@ def analyzed_event(
         source_ids=["src-1"],
         member_raw_ids=["raw-1"],
         source_tier=SourceTier.A,
-        analyzed_at=analyzed_at or AS_OF,
+        published_at=published,
+        collected_at=collected_at,
+        market_available_at=available,
+        analyzed_at=at,
     )
 
 

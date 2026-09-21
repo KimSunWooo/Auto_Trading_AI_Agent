@@ -6,7 +6,7 @@ from decimal import Decimal
 from pydantic import Field, model_validator
 
 from ai_investment_agent.domain.base import DomainModel
-from ai_investment_agent.domain.enums import Action, DecisionType, Horizon
+from ai_investment_agent.domain.enums import Action, DataMode, DecisionType, Horizon
 from ai_investment_agent.domain.errors import InvalidDecisionError
 from ai_investment_agent.domain.market import MarketRegime
 from ai_investment_agent.domain.policy import PolicyResult
@@ -51,6 +51,11 @@ class TradeProposal(DomainModel):
     policy_version: str = POLICY_VERSION
     generated_at: datetime
     policy_result: PolicyResult | None = None
+    data_mode: DataMode = DataMode.FIXTURE
+    analysis_as_of: datetime | None = None
+    valid_until: datetime | None = None
+    context_fingerprint: str | None = None
+    metric_source: str | None = None
 
     @property
     def decision(self) -> DecisionType:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from ai_investment_agent.domain.enums import ModelHealthStatus
 from ai_investment_agent.domain.evaluation import ModelHealthMetrics
 
 

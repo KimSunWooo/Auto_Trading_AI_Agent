@@ -114,7 +114,8 @@ def test_shadow_cash_is_ai_capital_limit_not_total():
     opened = ShadowPortfolio.opened(provided_capital())
     assert opened.cash == provided_capital().ai_capital_limit
     assert opened.cash != provided_capital().total_capital
-    assert opened.initial_capital == provided_capital().total_capital
+    assert opened.initial_capital == provided_capital().ai_capital_limit
+    assert opened.reference_total_capital == provided_capital().total_capital
     assert opened.source == "shadow_virtual"
     assert opened.convertible_to_broker is False
 

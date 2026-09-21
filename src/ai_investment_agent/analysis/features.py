@@ -20,14 +20,15 @@ def long_features_from(
     events = context.event_features
     return LongTermFeatures(
         daily_trend=quant.trend,
-        weekly_trend=quant.trend,
-        ma20=quant.ma_short,
-        ma60=quant.ma_long,
+        weekly_trend=quant.weekly_trend,
+        ma20=quant.ma20,
+        ma60=quant.ma60,
+        ma120=quant.ma120,
         last_price=last_price,
         momentum=quant.momentum,
         drawdown=quant.drawdown,
         volatility=quant.volatility,
-        sector_strength=_decimal(1.0 - events.sector_risk),
+        sector_strength=None,
         macro_risk=_decimal(events.macro_risk),
         long_horizon_event_bias=_signed_bias(events.dominant_direction, events.effective_impact),
     )

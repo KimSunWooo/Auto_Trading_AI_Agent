@@ -15,7 +15,7 @@ class EntryAnalyzer:
         if choice not in {HorizonChoice.LONG_TERM, HorizonChoice.SHORT_TERM}:
             return EntryTiming.NOT_APPLICABLE, []
         if snapshot is None:
-            return EntryTiming.BUY_NOW, []
+            return EntryTiming.WAIT, [ReasonCode.ENTRY_CONTEXT_MISSING.value, ReasonCode.ENTRY_WAIT.value]
 
         reasons: list[str] = []
         stretched = (

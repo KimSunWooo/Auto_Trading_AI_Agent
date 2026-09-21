@@ -11,7 +11,6 @@ from pydantic import Field
 
 from ai_investment_agent.adapters.event_store import InMemoryIntelligenceEventStore
 from ai_investment_agent.adapters.fixtures.embeddings import HashedBagEmbeddingProvider
-from ai_investment_agent.adapters.fixtures.portfolio import fixture_capital
 from ai_investment_agent.adapters.in_memory import (
     InMemoryDecisionPublisher,
     InMemoryDecisionRepository,
@@ -41,20 +40,24 @@ from ai_investment_agent.domain.decision import DecisionSnapshot
 from ai_investment_agent.domain.enums import (
     Action,
     CollectionStatus,
+    DataMode,
     EventSeverity,
     MarketDataKind,
 )
 from ai_investment_agent.domain.envelope import TradeProposalEnvelope
 from ai_investment_agent.domain.event_intelligence import AnalyzedMarketEvent, RawEvent
+from ai_investment_agent.domain.event_time import event_occurred_for_market
 from ai_investment_agent.domain.external_intelligence import IntelligenceRecord
 from ai_investment_agent.domain.journal import DecisionRecord
 from ai_investment_agent.domain.market import MarketEvent, MarketSnapshot
 from ai_investment_agent.domain.market_feed import MarketDataRecord
+from ai_investment_agent.domain.runtime import DecisionReadiness, ProviderStatus, RuntimeSettings
 from ai_investment_agent.domain.shadow import ShadowExecutionResult
 from ai_investment_agent.evaluation.health import ModelHealthAssessor
 from ai_investment_agent.evaluation.quality import QualityEvaluator
 from ai_investment_agent.features.engine import MarketContextEngine
 from ai_investment_agent.intelligence.pipeline import EventIntelligenceEngine
+from ai_investment_agent.policy.readiness import assess_readiness
 from ai_investment_agent.replay.service import ReplayBundle, ReplayService
 from ai_investment_agent.shadow.service import ShadowTradingService
 
@@ -92,6 +95,9 @@ class AnalysisResult(DomainModel):
     broker_called: Literal[False] = False
     shadow_execution: ShadowExecutionResult | None = None
     envelope: TradeProposalEnvelope | None = None
+    data_mode: DataMode = DataMode.FIXTURE
+    readiness: DecisionReadiness | None = None
+    provider_health: list[ProviderStatus] = Field(default_factory=list)
 
 
 class AnalysisService:
@@ -101,8 +107,10 @@ class AnalysisService:
         self,
         *,
         now_fn: Callable[[], datetime] | None = None,
+        runtime: RuntimeSettings | None = None,
     ) -> None:
         self._now = now_fn or (lambda: FIXTURE_AS_OF)
+        self.runtime = runtime or RuntimeSettings(data_mode=DataMode.FIXTURE)
         self.repository = InMemoryDecisionRepository()
         self.publisher = InMemoryDecisionPublisher()
         self.event_store = InMemoryIntelligenceEventStore()
@@ -128,6 +136,7 @@ class AnalysisService:
         self.shadow = ShadowTradingService()
         self.last_market: CollectionResult[MarketDataRecord] | None = None
         self.last_external: CollectionResult[IntelligenceRecord] | None = None
+        self.last_readiness: DecisionReadiness | None = None
         self.last_pipeline_error: str | None = None
 
     def evaluate(
@@ -157,24 +166,43 @@ class AnalysisService:
         disclosure = self.disclosure.collect(ticker, as_of)
         macro = self.macro.collect(as_of)
         scheduled = self.scheduled.collect(as_of, ticker=ticker)
+        providers = {
+            "news": news,
+            "disclosure": disclosure,
+            "macro": macro,
+            "scheduledEvent": scheduled,
+        }
         external_items = [
             *news.items,
             *disclosure.items,
             *macro.items,
             *scheduled.items,
         ]
-        external_status = _merge_external_status([news, disclosure, macro, scheduled])
+        external_status, external_error = merge_external_status(providers)
         if external_status is CollectionStatus.OK:
             self.last_external = CollectionResult.ok(external_items, as_of=as_of)
         elif external_status is CollectionStatus.NO_EVENT:
             self.last_external = CollectionResult.no_event(as_of=as_of)
         elif external_status is CollectionStatus.STALE:
             self.last_external = CollectionResult.stale(external_items, as_of=as_of)
-        else:
-            self.last_external = CollectionResult.unavailable(
-                error="external intelligence unavailable",
+        elif external_status is CollectionStatus.DEGRADED:
+            self.last_external = CollectionResult.degraded(
+                external_items,
+                error=external_error or "partial external provider outage",
                 as_of=as_of,
             )
+        else:
+            self.last_external = CollectionResult.unavailable(
+                error=external_error or "external intelligence unavailable",
+                as_of=as_of,
+            )
+
+        readiness = assess_readiness(
+            market=market,
+            providers=providers,
+            data_mode=self.runtime.data_mode,
+        )
+        self.last_readiness = readiness
 
         raw_events = [intelligence_to_raw(item) for item in external_items]
         analyzed = self.intelligence.ingest_many(raw_events) if raw_events else []
@@ -188,6 +216,7 @@ class AnalysisService:
             liquidity=_liquidity(market.items),
         )
         judgment_events = [analyzed_to_market_event(item, ticker) for item in analyzed]
+        capital = capital_context if capital_context is not None else CapitalContext.missing_conservative()
         judged = self.agent.judge(
             InvestmentJudgmentRequest(
                 ticker=ticker,
@@ -195,10 +224,12 @@ class AnalysisService:
                 regime=context.regime,
                 long_features=long_features_from(context, last_price=snapshot.last_price),
                 short_features=short_features_from(context, last_price=snapshot.last_price),
-                capital_context=capital_context or fixture_capital(),
+                capital_context=capital,
                 entry=entry_from(context),
                 feature_snapshot=context,
                 events=tuple(judgment_events),
+                data_mode=self.runtime.data_mode,
+                readiness=readiness,
             )
         )
         shadow_result = self.shadow.apply_snapshot(judged)
@@ -218,6 +249,9 @@ class AnalysisService:
             broker_called=False,
             shadow_execution=shadow_result,
             envelope=envelope,
+            data_mode=self.runtime.data_mode,
+            readiness=readiness,
+            provider_health=list(readiness.providers),
         )
 
     def list_decisions(self) -> list[DecisionRecord]:
@@ -248,15 +282,31 @@ def intelligence_to_raw(record: IntelligenceRecord) -> RawEvent:
 
 
 def analyzed_to_market_event(event: AnalyzedMarketEvent, ticker: str) -> MarketEvent:
+    occurred = event_occurred_for_market(
+        occurred_at=event.occurred_at,
+        market_available_at=event.market_available_at,
+        published_at=event.published_at,
+        source_received_at=event.source_received_at,
+        collected_at=event.collected_at,
+        analyzed_at=event.analyzed_at,
+    )
     return MarketEvent(
         event_id=event.event_id,
         ticker=ticker,
         event_type=event.event_type,
         title=event.headline,
-        occurred_at=event.analyzed_at,
+        occurred_at=occurred,
         severity=EventSeverity.INFO,
         source="event-intelligence",
-        payload={"clusterId": event.cluster_id, "direction": event.direction.value},
+        payload={
+            "clusterId": event.cluster_id,
+            "direction": event.direction.value,
+            "analyzedAt": event.analyzed_at.isoformat(),
+            "marketAvailableAt": (
+                event.market_available_at.isoformat() if event.market_available_at else None
+            ),
+            "publishedAt": event.published_at.isoformat() if event.published_at else None,
+        },
     )
 
 
@@ -321,12 +371,45 @@ def _liquidity(records: list[MarketDataRecord]) -> float | None:
     return float(value)
 
 
+def merge_external_status(
+    providers: dict[str, CollectionResult],
+) -> tuple[CollectionStatus, str | None]:
+    """Preserve per-provider failures. Partial outage is never overall OK."""
+
+    statuses = {name: result.status for name, result in providers.items()}
+    has_items = any(result.items for result in providers.values())
+    unavailable = [
+        name for name, status in statuses.items() if status is CollectionStatus.DATA_UNAVAILABLE
+    ]
+    stale = [name for name, status in statuses.items() if status is CollectionStatus.STALE]
+    ok_or_quiet = [
+        name
+        for name, status in statuses.items()
+        if status in {CollectionStatus.OK, CollectionStatus.NO_EVENT}
+    ]
+    if unavailable and not has_items and not stale and not ok_or_quiet:
+        return CollectionStatus.DATA_UNAVAILABLE, "external intelligence unavailable: " + ",".join(
+            unavailable
+        )
+    if unavailable or stale:
+        if ok_or_quiet or has_items:
+            detail = []
+            if unavailable:
+                detail.append("unavailable=" + ",".join(unavailable))
+            if stale:
+                detail.append("stale=" + ",".join(stale))
+            return CollectionStatus.DEGRADED, "partial external provider outage: " + " ".join(detail)
+        if stale:
+            return CollectionStatus.STALE, None
+        return CollectionStatus.DATA_UNAVAILABLE, "external intelligence unavailable"
+    if has_items:
+        return CollectionStatus.OK, None
+    if statuses and all(status is CollectionStatus.NO_EVENT for status in statuses.values()):
+        return CollectionStatus.NO_EVENT, None
+    return CollectionStatus.DATA_UNAVAILABLE, "external intelligence unavailable"
+
+
 def _merge_external_status(results: list[CollectionResult]) -> CollectionStatus:
-    statuses = [item.status for item in results]
-    if any(item.items for item in results):
-        if all(item.status is CollectionStatus.STALE for item in results if item.items):
-            return CollectionStatus.STALE
-        return CollectionStatus.OK
-    if all(status is CollectionStatus.NO_EVENT for status in statuses):
-        return CollectionStatus.NO_EVENT
-    return CollectionStatus.DATA_UNAVAILABLE
+    named = {f"provider{index}": result for index, result in enumerate(results)}
+    status, _error = merge_external_status(named)
+    return status

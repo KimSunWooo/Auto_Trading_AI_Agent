@@ -116,7 +116,10 @@ class EventFeatureCalculator:
         return cfg.category_relevance.get(event.category, cfg.unmatched_relevance)
 
     def time_decay_for(self, event: AnalyzedMarketEvent, as_of: datetime) -> float:
-        age = as_of - event.analyzed_at
+        available = event.market_available_at
+        if available is None:
+            return 0.0
+        age = as_of - available
         seconds = age.total_seconds()
         if seconds < 0:
             return 0.0

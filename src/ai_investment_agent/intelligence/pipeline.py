@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from ai_investment_agent.domain.enums import EventCategory, VerificationStatus
 from ai_investment_agent.domain.event_intelligence import AnalyzedMarketEvent, RawEvent
+from ai_investment_agent.domain.event_time import resolve_market_available_at
 from ai_investment_agent.domain.ids import new_event_id
 from ai_investment_agent.intelligence.dedup import EventDeduplicator
 from ai_investment_agent.intelligence.entities import EntityExtractor
@@ -101,6 +102,14 @@ class EventIntelligenceEngine:
             article_count=cluster.article_count,
             injection_blocked=injection_blocked,
         )
+        published = [item.published_at for item in members if item.published_at is not None]
+        collected = [item.collected_at for item in members if item.collected_at is not None]
+        published_at = min(published) if published else None
+        collected_at = min(collected) if collected else None
+        market_available_at = resolve_market_available_at(
+            published_at=published_at,
+            collected_at=collected_at,
+        )
         return AnalyzedMarketEvent(
             event_id=existing_id or new_event_id(),
             cluster_id=cluster.cluster_id,
@@ -124,5 +133,8 @@ class EventIntelligenceEngine:
             member_raw_ids=list(cluster.member_raw_ids),
             source_tier=tier,
             injection_blocked=injection_blocked,
+            published_at=published_at,
+            collected_at=collected_at,
+            market_available_at=market_available_at,
             analyzed_at=self._now(),
         )

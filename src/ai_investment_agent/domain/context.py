@@ -42,6 +42,10 @@ class QuantitativeFeatures(DomainModel):
     return_5d: Decimal | None = None
     ma_short: Decimal | None = None
     ma_long: Decimal | None = None
+    ma20: Decimal | None = None
+    ma60: Decimal | None = None
+    ma120: Decimal | None = None
+    weekly_trend: Decimal | None = None
     momentum: Decimal | None = None
     volatility: Decimal | None = None
     drawdown: Decimal | None = None

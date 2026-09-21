@@ -22,6 +22,30 @@
 
 `NO_TRADE`는 정상적이고 중요한 결과입니다.
 
+## 현재 단계
+
+- Phase 1~10 complete
+- Pre-10.5 stabilization complete (Fail-Closed, Feature semantics, Runtime/Contract boundary, Persistence/CI baseline)
+- **10.5 Live Intelligence Adapter는 아직 구현하지 않았습니다**
+- Live Market Data not connected
+- Live DART not connected
+- Live News not connected
+- Live Macro not connected
+- Live LLM not connected
+- Auto-Trading-system not connected
+- Broker/orders unavailable
+
+Runtime / Data Mode: `FIXTURE` · `REPLAY` · `LIVE_OBSERVATION` · `LIVE_SHADOW`. 기본 실행은 `FIXTURE`입니다. Profile이 없으면 LIVE로 간주하지 않습니다.
+
+## Persistence
+
+현재 Decision journal, Event store, Shadow book, Evaluation history는 **InMemory**입니다.
+
+- 10.5 Live Observation → InMemory 가능
+- 장시간 Live Shadow Soak 이전 → Durable Persistence 필수
+- 권장 미래 구조: AI Agent 전용 PostgreSQL
+- Auto-Trading-system DB와 절대 공유하지 않음
+
 ## 요구 사항
 
 - Python 3.11+
@@ -282,8 +306,8 @@ AI 판단을 **가상 계좌**에서 평가하는 계층입니다. 실제 Broker
 
 AI 전용 가상 계좌입니다. 시작 현금은 `totalCapital`이 아니라 `aiCapitalLimit`입니다.
 
-- Initial Capital
-- AI Capital Limit
+- Initial Capital = AI Shadow Sleeve initial capital (`aiCapitalLimit`)
+- Reference Total Capital = 전체 계좌 참고값 (`totalCapital`). Shadow 성과의 분모가 아님
 - Cash
 - Positions (`ShadowPosition`)
 - Realized PnL
@@ -348,6 +372,20 @@ AI 판단과 Shadow 결과를 비교합니다.
 - EventPipelineHealth
 
 종합 상태: `HEALTHY` · `DEGRADED` · `UNHEALTHY` · `UNKNOWN`. `UNKNOWN`은 `HEALTHY`로 간주하지 않습니다. 컴포넌트 하나가 UNKNOWN이면 종합도 HEALTHY가 될 수 없습니다.
+
+`GET /`와 `GET /health`는 `runtimeProfile`, `dataMode`, `ordersEnabled=false`, `brokerConnected=false`, `autoTradingSystemConnected=false`를 노출합니다.
+
+DecisionReadiness (`READY` / `DEGRADED` / `BLOCKED` / `UNKNOWN`)는 TradeProposal 생성 전 게이트입니다. 필수 Market Data unavailable/stale이면 신규 BUY가 금지됩니다. External provider 부분 장애는 overall HEALTHY로 숨기지 않고 `DEGRADED`로 남깁니다.
+
+## Fail-Closed 원칙
+
+- Entry 정보 없음 ≠ 좋은 진입 시점 (`TACTICAL_WAIT`)
+- CapitalContext 없음 → `missing_conservative()` → deployable capital 0 → 신규 BUY 금지
+- Live-compatible profile에서 Portfolio/Risk unknown → UNKNOWN → 신규 BUY 금지
+- Missing Data is not Zero. Missing Context is not Unlimited.
+- `NO_EVENT` ≠ `DATA_UNAVAILABLE`
+- `NO_TRADE` is a valid successful outcome
+- AI는 주문 권한을 갖지 않습니다
 
 ## 향후 통합 Contract
 

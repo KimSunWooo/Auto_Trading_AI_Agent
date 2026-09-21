@@ -136,6 +136,11 @@ class AnalyzedMarketEvent(DomainModel):
     member_raw_ids: list[str] = Field(default_factory=list)
     source_tier: SourceTier
     injection_blocked: bool = False
+    occurred_at: datetime | None = None
+    published_at: datetime | None = None
+    source_received_at: datetime | None = None
+    collected_at: datetime | None = None
+    market_available_at: datetime | None = None
     analyzed_at: datetime
 
     @model_validator(mode="after")

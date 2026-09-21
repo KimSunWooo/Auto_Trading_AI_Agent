@@ -56,6 +56,8 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
             "ordersEnabled": False,
             "brokerConnected": False,
             "autoTradingSystemConnected": False,
+            "runtimeProfile": analysis.runtime.data_mode.value,
+            "dataMode": analysis.runtime.data_mode.value,
             "integrationStatus": "contract_only",
             "contractSchemaVersion": CURRENT_SCHEMA_VERSION,
         }
@@ -122,6 +124,11 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
         )
         payload["unknownIsHealthy"] = False
         payload["status"] = report.status.value
+        payload["runtimeProfile"] = report.runtime_profile
+        payload["dataMode"] = report.data_mode
+        payload["ordersEnabled"] = False
+        payload["brokerConnected"] = False
+        payload["autoTradingSystemConnected"] = False
         return JSONResponse(payload)
 
     @app.get("/shadow/portfolio")

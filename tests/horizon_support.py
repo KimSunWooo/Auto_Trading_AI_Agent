@@ -17,6 +17,7 @@ from ai_investment_agent.domain.agent_views import (
 from ai_investment_agent.domain.enums import MarketRegimeType
 from ai_investment_agent.domain.market import MarketRegime, MarketSnapshot
 from tests.support import provided_capital
+from tests.context_support import rising_series
 
 AS_OF = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
 
@@ -91,8 +92,36 @@ def bearish_short() -> ShortTermFeatures:
     )
 
 
+def bullish_short() -> ShortTermFeatures:
+    bars = rising_series(n=8)
+    return ShortTermFeatures(
+        intraday_trend=Decimal("1.00"),
+        ohlcv_1m=bars,
+        ohlcv_5m=bars,
+        ohlcv_15m=bars,
+        vwap=Decimal("100"),
+        volume_spike=Decimal("2.4"),
+        momentum=Decimal("0.50"),
+        breakout=Decimal("1.00"),
+        short_lived_event_bias=Decimal("1.00"),
+        volatility=Decimal("0.005"),
+        liquidity=Decimal("0.90"),
+        spread=Decimal("0.10"),
+        last_price=Decimal("110"),
+    )
+
+
 def weak_short() -> ShortTermFeatures:
     return ShortTermFeatures()
+
+
+def good_entry() -> EntrySnapshot:
+    return EntrySnapshot(
+        extension_vs_ma=Decimal("0.01"),
+        already_priced_in=0.20,
+        remaining_edge=0.60,
+        liquidity=Decimal("0.80"),
+    )
 
 
 def poor_entry() -> EntrySnapshot:
@@ -121,6 +150,7 @@ def judge(
     short_features: ShortTermFeatures,
     regime: MarketRegimeType = MarketRegimeType.SIDEWAYS,
     entry: EntrySnapshot | None = None,
+    **kwargs,
 ):
     agent, _ = make_investment_agent()
     return agent.judge(
@@ -130,7 +160,8 @@ def judge(
             regime=make_regime(regime),
             long_features=long_features,
             short_features=short_features,
-            capital_context=provided_capital(),
+            capital_context=kwargs.pop("capital_context", provided_capital()),
             entry=entry,
+            **kwargs,
         )
     )
