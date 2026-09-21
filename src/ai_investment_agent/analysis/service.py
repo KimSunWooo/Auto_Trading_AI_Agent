@@ -32,6 +32,7 @@ from ai_investment_agent.collectors.intelligence import (
     FixtureScheduledEventCollector,
 )
 from ai_investment_agent.collectors.market import FixtureMarketDataCollector
+from ai_investment_agent.contracts.encode import envelope_from_proposal
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.collection import CollectionResult
@@ -43,6 +44,7 @@ from ai_investment_agent.domain.enums import (
     EventSeverity,
     MarketDataKind,
 )
+from ai_investment_agent.domain.envelope import TradeProposalEnvelope
 from ai_investment_agent.domain.event_intelligence import AnalyzedMarketEvent, RawEvent
 from ai_investment_agent.domain.external_intelligence import IntelligenceRecord
 from ai_investment_agent.domain.journal import DecisionRecord
@@ -89,6 +91,7 @@ class AnalysisResult(DomainModel):
     orders_placed: Literal[0] = 0
     broker_called: Literal[False] = False
     shadow_execution: ShadowExecutionResult | None = None
+    envelope: TradeProposalEnvelope | None = None
 
 
 class AnalysisService:
@@ -199,6 +202,7 @@ class AnalysisService:
             )
         )
         shadow_result = self.shadow.apply_snapshot(judged)
+        envelope = envelope_from_proposal(judged.proposal)
         return AnalysisResult(
             decision_id=judged.decision_id,
             ticker=ticker,
@@ -213,6 +217,7 @@ class AnalysisService:
             orders_placed=0,
             broker_called=False,
             shadow_execution=shadow_result,
+            envelope=envelope,
         )
 
     def list_decisions(self) -> list[DecisionRecord]:

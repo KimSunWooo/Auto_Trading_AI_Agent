@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-investment-agent.local/contracts/ai.trade-proposal.v1.json",
+  "title": "TradeProposalEnvelope",
+  "description": "Versioned judgment payload produced by the AI Investment Agent. A future Auto-Trading-system may consume this document. It is not an order, not a broker instruction, and not a live integration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "proposalId",
+    "generatedAt",
+    "ticker",
+    "market",
+    "horizon",
+    "action",
+    "confidence",
+    "confidenceSource",
+    "expectedReturn",
+    "estimatedRisk",
+    "suggestedCapitalPct",
+    "thesis",
+    "invalidationConditions",
+    "reasonCodes",
+    "modelVersion",
+    "featureVersion",
+    "policyVersion",
+    "artifactType",
+    "isOrder",
+    "producer",
+    "intendedConsumer"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "ai.trade-proposal.v1"
+    },
+    "proposalId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Idempotency key. Duplicate proposalId must be treated as the same judgment."
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ticker": {
+      "type": "string",
+      "minLength": 1
+    },
+    "market": {
+      "type": "string",
+      "const": "KRX"
+    },
+    "horizon": {
+      "type": "string",
+      "enum": ["LONG_TERM", "SHORT_TERM", "NONE"]
+    },
+    "action": {
+      "type": "string",
+      "enum": ["BUY", "SELL", "HOLD", "NO_TRADE", "TACTICAL_WAIT", "EXIT_REVIEW"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "calibratedConfidence when present; otherwise rawConfidence. Never invented."
+    },
+    "confidenceSource": {
+      "type": "string",
+      "enum": ["RAW", "CALIBRATED"]
+    },
+    "expectedReturn": {
+      "type": "string",
+      "description": "Decimal serialized as a string."
+    },
+    "estimatedRisk": {
+      "type": "string",
+      "description": "Decimal serialized as a string. Non-negative."
+    },
+    "suggestedCapitalPct": {
+      "type": "string",
+      "description": "Recommended fraction of AI-allocatable capital, 0-100. Not an order size."
+    },
+    "thesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "summary", "bullCase", "bearCase", "drivers", "invalidations"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "bullCase": { "type": "string" },
+        "bearCase": { "type": "string" },
+        "drivers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "invalidations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "invalidationConditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "description"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "reasonCodes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "modelVersion": { "type": "string", "minLength": 1 },
+    "featureVersion": { "type": "string", "minLength": 1 },
+    "policyVersion": { "type": "string", "minLength": 1 },
+    "artifactType": {
+      "type": "string",
+      "const": "TRADE_PROPOSAL"
+    },
+    "isOrder": {
+      "type": "boolean",
+      "const": false
+    },
+    "producer": {
+      "type": "string",
+      "const": "ai_investment_agent"
+    },
+    "intendedConsumer": {
+      "type": "string",
+      "const": "future_auto_trading_system"
+    }
+  }
+}

@@ -1,20 +1,5 @@
 """Core domain models. This layer has no adapter, SDK, or I/O imports."""
 
-from ai_investment_agent.domain.capital import CapitalContext
-from ai_investment_agent.domain.policy import (
-    FixturePositionSlice,
-    HumanOverride,
-    PolicyResult,
-    PortfolioContext,
-    RiskBudgetUsage,
-    RiskBudgets,
-)
-from ai_investment_agent.domain.collection import (
-    CollectionResult,
-    CollectionTimestamps,
-    is_accessible_at,
-    is_stale,
-)
 from ai_investment_agent.domain.agent_views import (
     AgentAssessment,
     EntrySnapshot,
@@ -23,24 +8,31 @@ from ai_investment_agent.domain.agent_views import (
     LongTermFeatures,
     ShortTermFeatures,
 )
-from ai_investment_agent.domain.corporate_action import CorporateAction
-from ai_investment_agent.domain.decision import DecisionSnapshot
+from ai_investment_agent.domain.capital import CapitalContext
+from ai_investment_agent.domain.collection import (
+    CollectionResult,
+    CollectionTimestamps,
+    is_accessible_at,
+    is_stale,
+)
+from ai_investment_agent.domain.confidence import CalibrationTable, ConfidenceAssessment
 from ai_investment_agent.domain.context import (
     EventImpactFeatures,
     MacroSurprise,
     MarketContext,
     QuantitativeFeatures,
 )
+from ai_investment_agent.domain.corporate_action import CorporateAction
+from ai_investment_agent.domain.decision import DecisionSnapshot
 from ai_investment_agent.domain.enums import (
     Action,
     AgentPriority,
-    KillSwitchLevel,
-    PolicyAction,
-    PolicyState,
     CollectionStatus,
+    ConfidenceSource,
     ContextSignal,
     CorporateActionType,
     DecisionType,
+    EnvelopeArtifactType,
     EvaluationStatus,
     EventCategory,
     EventDirection,
@@ -51,10 +43,13 @@ from ai_investment_agent.domain.enums import (
     ImpactHorizon,
     IntelligenceKind,
     JournalStage,
+    KillSwitchLevel,
     MarketDataKind,
     MarketRegimeType,
     ModelHealthStatus,
     ModelLifecycleStage,
+    PolicyAction,
+    PolicyState,
     QualityAxis,
     RawPutResult,
     ReasonCode,
@@ -64,7 +59,12 @@ from ai_investment_agent.domain.enums import (
     Stance,
     VerificationStatus,
 )
-from ai_investment_agent.domain.confidence import CalibrationTable, ConfidenceAssessment
+from ai_investment_agent.domain.envelope import (
+    ConsumerTradeProposalEnvelope,
+    EnvelopeInvalidation,
+    EnvelopeThesis,
+    TradeProposalEnvelope,
+)
 from ai_investment_agent.domain.evaluation import (
     CounterfactualOutcome,
     ModelHealthMetrics,
@@ -73,7 +73,6 @@ from ai_investment_agent.domain.evaluation import (
     QualityScore,
     VersionPin,
 )
-from ai_investment_agent.domain.journal import DecisionJournalEntry, DecisionRecord
 from ai_investment_agent.domain.event_intelligence import (
     AnalyzedMarketEvent,
     EventCluster,
@@ -81,10 +80,20 @@ from ai_investment_agent.domain.event_intelligence import (
     RawEvent,
 )
 from ai_investment_agent.domain.external_intelligence import IntelligenceRecord
+from ai_investment_agent.domain.journal import DecisionJournalEntry, DecisionRecord
 from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketSnapshot
 from ai_investment_agent.domain.market_feed import MarketDataRecord, OhlcvBar
+from ai_investment_agent.domain.policy import (
+    FixturePositionSlice,
+    HumanOverride,
+    PolicyResult,
+    PortfolioContext,
+    RiskBudgets,
+    RiskBudgetUsage,
+)
 from ai_investment_agent.domain.proposal import TradeProposal
 from ai_investment_agent.domain.raw import RawRecord
+from ai_investment_agent.domain.serialization import from_json, to_json
 from ai_investment_agent.domain.shadow import (
     ShadowCostModel,
     ShadowExecutionResult,
@@ -95,14 +104,24 @@ from ai_investment_agent.domain.shadow import (
     ShadowPosition,
     ShadowSkipRecord,
 )
-from ai_investment_agent.domain.serialization import from_json, to_json
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
-from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION, PROMPT_VERSION
+from ai_investment_agent.domain.versions import (
+    FEATURE_VERSION,
+    MODEL_VERSION,
+    POLICY_VERSION,
+    PROMPT_VERSION,
+    TRADE_PROPOSAL_SCHEMA_VERSION,
+)
 
 __all__ = [
+    "FEATURE_VERSION",
+    "MODEL_VERSION",
+    "POLICY_VERSION",
+    "PROMPT_VERSION",
+    "TRADE_PROPOSAL_SCHEMA_VERSION",
     "Action",
-    "AgentPriority",
     "AgentAssessment",
+    "AgentPriority",
     "AnalyzedMarketEvent",
     "CalibrationTable",
     "CapitalContext",
@@ -110,6 +129,8 @@ __all__ = [
     "CollectionStatus",
     "CollectionTimestamps",
     "ConfidenceAssessment",
+    "ConfidenceSource",
+    "ConsumerTradeProposalEnvelope",
     "ContextSignal",
     "CorporateAction",
     "CorporateActionType",
@@ -119,32 +140,33 @@ __all__ = [
     "DecisionSnapshot",
     "DecisionType",
     "EntrySnapshot",
+    "EnvelopeArtifactType",
+    "EnvelopeInvalidation",
+    "EnvelopeThesis",
+    "EvaluationStatus",
     "EventCategory",
     "EventCluster",
     "EventDirection",
-    "EventSeverity",
     "EventImpactFeatures",
-    "EvaluationStatus",
+    "EventSeverity",
     "ExtractedEntities",
     "FixturePosition",
     "FixturePositionSlice",
-    "FEATURE_VERSION",
     "FreshnessClass",
     "Horizon",
     "HorizonChoice",
     "HorizonDecision",
     "HumanOverride",
     "ImpactHorizon",
-    "KillSwitchLevel",
     "IntelligenceKind",
     "IntelligenceRecord",
     "InvalidationCondition",
     "InvestmentThesis",
     "JournalStage",
+    "KillSwitchLevel",
     "LongTermFeatures",
     "MacroSurprise",
     "MarketContext",
-    "MODEL_VERSION",
     "MarketDataKind",
     "MarketDataRecord",
     "MarketEvent",
@@ -155,10 +177,8 @@ __all__ = [
     "ModelHealthStatus",
     "ModelLifecyclePlan",
     "ModelLifecycleStage",
-    "OhlcvBar",
     "OfflineEvaluationReport",
-    "POLICY_VERSION",
-    "PROMPT_VERSION",
+    "OhlcvBar",
     "PolicyAction",
     "PolicyResult",
     "PolicyState",
@@ -182,14 +202,15 @@ __all__ = [
     "ShadowPosition",
     "ShadowSide",
     "ShadowSkipRecord",
-    "SourceTier",
     "ShortTermFeatures",
+    "SourceTier",
     "Stance",
     "TradeProposal",
+    "TradeProposalEnvelope",
+    "VerificationStatus",
     "VersionPin",
     "from_json",
     "is_accessible_at",
     "is_stale",
     "to_json",
-    "VerificationStatus",
 ]

@@ -9,6 +9,13 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 
 from ai_investment_agent.analysis.service import AnalysisService
+from ai_investment_agent.contracts.compatibility import POLICY
+from ai_investment_agent.contracts.encode import envelope_from_proposal
+from ai_investment_agent.contracts.schema_loader import load_schema
+from ai_investment_agent.contracts.versioning import (
+    CURRENT_SCHEMA_VERSION,
+    SUPPORTED_SCHEMA_VERSIONS,
+)
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.enums import ModelHealthStatus
 from ai_investment_agent.domain.errors import DecisionNotFoundError
@@ -49,6 +56,8 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
             "ordersEnabled": False,
             "brokerConnected": False,
             "autoTradingSystemConnected": False,
+            "integrationStatus": "contract_only",
+            "contractSchemaVersion": CURRENT_SCHEMA_VERSION,
         }
 
     @app.post("/analysis/evaluate")
@@ -75,6 +84,34 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
         except DecisionNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return JSONResponse(bundle.model_dump(mode="json"))
+
+    @app.get("/decisions/{decision_id}/envelope")
+    def get_envelope(decision_id: str) -> JSONResponse:
+        snapshot = analysis.get_decision(decision_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="decision not found")
+        envelope = envelope_from_proposal(snapshot.proposal)
+        return JSONResponse(envelope.model_dump(mode="json"))
+
+    @app.get("/contracts")
+    def list_contracts() -> JSONResponse:
+        return JSONResponse(
+            {
+                "family": "ai.trade-proposal",
+                "current": CURRENT_SCHEMA_VERSION,
+                "supported": list(SUPPORTED_SCHEMA_VERSIONS),
+                "autoTradingSystemConnected": False,
+                "liveOrderPathDefined": False,
+            }
+        )
+
+    @app.get("/contracts/trade-proposal/v1")
+    def trade_proposal_v1_schema() -> JSONResponse:
+        return JSONResponse(load_schema())
+
+    @app.get("/contracts/compatibility")
+    def compatibility_policy() -> JSONResponse:
+        return JSONResponse(POLICY.model_dump(mode="json"))
 
     @app.get("/health")
     def health_endpoint() -> JSONResponse:

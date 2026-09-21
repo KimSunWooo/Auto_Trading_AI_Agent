@@ -67,6 +67,7 @@ src/ai_investment_agent/
   health/        # process + component health (UNKNOWN ≠ HEALTHY)
   analysis/      # Market Data → TradeProposal 파이프라인
   shadow/        # AI 전용 가상 계좌 / 가상 체결. Broker entity 아님
+  contracts/     # TradeProposalEnvelope v1. 전송/ATS 연결 없음
   api/           # FastAPI. 주문 라우트 없음
 ```
 
@@ -89,6 +90,7 @@ domain → 표준 라이브러리 + pydantic  (adapter/SDK 금지)
 - `InvestmentThesis`, `TradeProposal`
 - `DecisionSnapshot`, `DecisionRecord`, `DecisionJournalEntry`
 - `ShadowOrder`, `ShadowFill`, `ShadowPosition`, `ShadowPortfolio` (가상 장부. Broker Order/Fill/Position이 아님)
+- `TradeProposalEnvelope` (`schemaVersion=ai.trade-proposal.v1`. 향후 Consumer용 계약. 주문이 아님)
 
 지원 Decision:
 
@@ -246,8 +248,12 @@ Decision Logs → Offline Evaluation → Candidate Model → Backtest → Shadow
 | GET | `/decisions/{decisionId}` | 단건 조회 |
 | POST | `/decisions/{decisionId}/replay` | 당시 snapshot과 version pin 복원 |
 | GET | `/health` | 컴포넌트별 health + 종합 상태 |
+| GET | `/contracts` | 지원 schemaVersion 목록. ATS 연결 아님 |
+| GET | `/contracts/trade-proposal/v1` | `TradeProposalEnvelope` JSON Schema |
+| GET | `/contracts/compatibility` | Compatibility Policy |
+| GET | `/decisions/{decisionId}/envelope` | 저장된 판단의 v1 envelope |
 
-만들지 않는 라우트: `POST /orders`, `/buy`, `/sell`, `/cancel`, `/broker/*`.
+만들지 않는 라우트: `POST /orders`, `/buy`, `/sell`, `/cancel`, `/broker/*`. ATS로 push하는 POST도 없습니다.
 
 1차 완성 흐름:
 
@@ -342,5 +348,15 @@ AI 판단과 Shadow 결과를 비교합니다.
 - EventPipelineHealth
 
 종합 상태: `HEALTHY` · `DEGRADED` · `UNHEALTHY` · `UNKNOWN`. `UNKNOWN`은 `HEALTHY`로 간주하지 않습니다. 컴포넌트 하나가 UNKNOWN이면 종합도 HEALTHY가 될 수 없습니다.
+
+## 향후 통합 Contract
+
+AI Agent는 **TradeProposal Producer**, 자동매매 시스템은 향후 **TradeProposal Consumer**입니다. 지금은 계약만 고정하며 Auto-Trading-system과 연결하지 않습니다.
+
+- Schema: `ai.trade-proposal.v1`
+- 문서: `docs/INTEGRATION_CONTRACT.md` (Versioning, Compatibility, REST vs Broker vs Shared Package, Sequence, Migration)
+- Encoder: `envelope_from_proposal` — 로컬 JSON만 만들고 전송하지 않음
+- `isOrder`는 항상 `false`. PAPER/REAL 주문 경로 없음
+
 
 

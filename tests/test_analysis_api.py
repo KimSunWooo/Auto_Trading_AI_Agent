@@ -22,6 +22,9 @@ def test_evaluate_pipeline_reaches_journal_without_orders():
         "TACTICAL_WAIT",
         "EXIT_REVIEW",
     }
+    assert result.envelope is not None
+    assert result.envelope.is_order is False
+    assert result.envelope.schema_version == "ai.trade-proposal.v1"
     stored = service.get_decision(result.decision_id)
     assert stored is not None
     assert stored.proposal.decision_id == result.decision_id
@@ -42,6 +45,8 @@ def test_analysis_api_evaluate_list_get_replay_and_health():
     assert body["pipeline"][-1] == "SHADOW_EXECUTION"
     assert body["shadowExecution"]["brokerCalled"] is False
     assert body["shadowExecution"]["liveOrderPlaced"] is False
+    assert body["envelope"]["schemaVersion"] == "ai.trade-proposal.v1"
+    assert body["envelope"]["isOrder"] is False
     decision_id = body["decisionId"]
 
     listed = client.get("/decisions")

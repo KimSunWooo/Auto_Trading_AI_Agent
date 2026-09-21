@@ -46,6 +46,19 @@ class Action(str, Enum):
     EXIT_REVIEW = "EXIT_REVIEW"
 
 
+class ConfidenceSource(str, Enum):
+    """How envelope.confidence was chosen. Calibrated values are never invented."""
+
+    RAW = "RAW"
+    CALIBRATED = "CALIBRATED"
+
+
+class EnvelopeArtifactType(str, Enum):
+    """Wire artifact. This is never an order."""
+
+    TRADE_PROPOSAL = "TRADE_PROPOSAL"
+
+
 class DecisionType(str, Enum):
     """Canonical judgment outcomes this agent can emit."""
 

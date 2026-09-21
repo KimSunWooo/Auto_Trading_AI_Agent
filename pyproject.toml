@@ -31,6 +31,7 @@ where = ["src"]
 ai_investment_agent = [
     "adapters/fixtures/data/*.json",
     "collectors/data/*.json",
+    "contracts/schemas/*.json",
 ]
 
 [tool.pytest.ini_options]
