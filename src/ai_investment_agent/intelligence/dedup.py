@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from ai_investment_agent.adapters.fixtures.embeddings import HashedBagEmbeddingProvider
 from ai_investment_agent.domain.event_intelligence import EventCluster, NormalizedEvent
 from ai_investment_agent.domain.ids import new_cluster_id
+from ai_investment_agent.intelligence.lexical_embed import HashedBagEmbeddingProvider
 from ai_investment_agent.intelligence.text import cosine, jaccard
 from ai_investment_agent.ports.embeddings import EmbeddingProvider
 
