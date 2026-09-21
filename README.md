@@ -48,8 +48,8 @@ src/ai_investment_agent/
   intelligence/  # Event Intelligence + fixture regime assessor
   features/      # deterministic Market Context / Feature Engine
   scanner/       # 이후 단계
-  agents/        # JudgmentAgent 오케스트레이션
-  horizon/       # LONG_TERM / SHORT_TERM 매핑
+  horizon/       # HorizonSelector + LONG/SHORT mapping
+  agents/        # LongTermAgent, ShortTermAgent, InvestmentJudgmentAgent
   decision/      # 순수 DecisionEngine
   capital/       # CapitalContext 해석. 누락 시 0, 무한 자금 아님
   policy/        # 하드 게이트 (UNKNOWN → NO_TRADE)
@@ -136,4 +136,18 @@ Event effectiveImpact:
 - Macro surprise는 actual과 consensus가 있을 때만 계산하며, 빈 값을 추측하지 않습니다.
 - Priced-in은 `PricedInAnalyzer` 포트로 교체 가능한 heuristic입니다.
 - Positive event + 강한 음수 시장 반응이면 `EVENT_MARKET_DIVERGENCE`를 만들고 event confidence를 낮춥니다.
+
+## Long / Short Agents
+
+Long-Term Agent와 Short-Term Agent는 **독립적으로** 판단합니다. 점수를 평균 내지 않습니다.
+
+Long 예: Daily/Weekly Trend, MA20/60/120, Momentum, Drawdown, Fundamentals, Valuation, Sector Strength, Macro Risk, Long Horizon Events. 없는 값은 추측하지 않습니다.
+
+Short 예: Intraday trend, 1m/5m/15m OHLCV, VWAP, Volume Spike, Momentum, Breakout, Volatility, Liquidity, Spread, Short-lived Event. 아직 없는 피처는 optional입니다.
+
+Horizon Selector 반환값: `LONG_TERM` / `SHORT_TERM` / `TACTICAL_WAIT` / `NO_TRADE`. 억지로 하나를 고르지 않습니다. Long bullish + Short bearish 이면 `LONG_THESIS_VALID` + `TACTICAL_WAIT`가 가능합니다.
+
+Net Edge = Expected Return − Risk Penalty − Transaction Cost − Slippage − Drawdown Penalty − Tail Risk − Uncertainty Penalty. 부족하면 `NO_TRADE`.
+
+BUY/HOLD thesis에는 `drivers`와 `invalidations`를 남깁니다. `EntryAnalyzer`와 `PositionThesisMonitor`는 분리되어 있고, Position은 fixture만 사용합니다. 결과는 여전히 TradeProposal까지입니다.
 

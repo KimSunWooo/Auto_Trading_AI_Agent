@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import Field
 
+from ai_investment_agent.domain.agent_views import HorizonDecision
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.enums import AgentPriority
@@ -28,3 +29,4 @@ class DecisionSnapshot(DomainModel):
     proposal: TradeProposal
     priorities_applied: list[AgentPriority] = Field(default_factory=list)
     created_at: datetime
+    horizon_decision: HorizonDecision | None = None

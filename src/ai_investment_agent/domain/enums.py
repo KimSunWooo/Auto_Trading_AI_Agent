@@ -9,6 +9,34 @@ class Horizon(str, Enum):
     NONE = "NONE"
 
 
+class HorizonChoice(str, Enum):
+    """Selector output. Not forced to LONG_TERM vs SHORT_TERM."""
+
+    LONG_TERM = "LONG_TERM"
+    SHORT_TERM = "SHORT_TERM"
+    TACTICAL_WAIT = "TACTICAL_WAIT"
+    NO_TRADE = "NO_TRADE"
+
+
+class Stance(str, Enum):
+    BULLISH = "BULLISH"
+    BEARISH = "BEARISH"
+    NEUTRAL = "NEUTRAL"
+    WEAK = "WEAK"
+
+
+class EntryTiming(str, Enum):
+    BUY_NOW = "BUY_NOW"
+    WAIT = "WAIT"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class PositionThesisStatus(str, Enum):
+    NO_POSITION = "NO_POSITION"
+    THESIS_INTACT = "THESIS_INTACT"
+    EXIT_REVIEW = "EXIT_REVIEW"
+
+
 class Action(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
@@ -78,6 +106,15 @@ class ReasonCode(str, Enum):
     LOW_DATA_COMPLETENESS = "LOW_DATA_COMPLETENESS"
     EVENT_MARKET_DIVERGENCE = "EVENT_MARKET_DIVERGENCE"
     EVENT_RISK_ELEVATED = "EVENT_RISK_ELEVATED"
+    LONG_THESIS_VALID = "LONG_THESIS_VALID"
+    SHORT_THESIS_VALID = "SHORT_THESIS_VALID"
+    LONG_SHORT_CONFLICT = "LONG_SHORT_CONFLICT"
+    BOTH_AGENTS_WEAK = "BOTH_AGENTS_WEAK"
+    LOW_NET_EDGE = "LOW_NET_EDGE"
+    POOR_ENTRY = "POOR_ENTRY"
+    ENTRY_WAIT = "ENTRY_WAIT"
+    HORIZON_UNRESOLVED = "HORIZON_UNRESOLVED"
+    SHORT_BEARISH = "SHORT_BEARISH"
 
 
 class CollectionStatus(str, Enum):

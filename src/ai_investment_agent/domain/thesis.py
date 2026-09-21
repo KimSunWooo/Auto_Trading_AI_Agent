@@ -19,4 +19,6 @@ class InvestmentThesis(DomainModel):
     time_horizon: Horizon = Horizon.NONE
     catalysts: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
+    drivers: list[str] = Field(default_factory=list)
+    invalidations: list[str] = Field(default_factory=list)
     invalidation_summary: str = ""
