@@ -1,5 +1,5 @@
-"""HTTP API is intentionally not implemented in this phase.
+"""HTTP API. Judgment only; no order routes."""
 
-The judgment agent is invoked in-process. A later phase may expose
-read-only inspection endpoints. No order routes will ever exist here.
-"""
+from ai_investment_agent.api.app import app, create_app
+
+__all__ = ["app", "create_app"]

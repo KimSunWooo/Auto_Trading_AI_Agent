@@ -34,7 +34,7 @@ from ai_investment_agent.domain.enums import (
     Stance,
 )
 from ai_investment_agent.domain.ids import new_decision_id
-from ai_investment_agent.domain.market import MarketRegime, MarketSnapshot
+from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketSnapshot
 from ai_investment_agent.domain.policy import HumanOverride, PortfolioContext, RiskBudgets
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
 from ai_investment_agent.domain.versions import PROMPT_VERSION
@@ -63,6 +63,7 @@ class InvestmentJudgmentRequest:
     policy_state: PolicyState = PolicyState.NORMAL
     kill_switch_level: KillSwitchLevel = KillSwitchLevel.LEVEL_0_NORMAL
     feature_snapshot: MarketContext | None = None
+    events: tuple[MarketEvent, ...] = ()
 
 
 class InvestmentJudgmentAgent:
@@ -165,7 +166,7 @@ class InvestmentJudgmentAgent:
             decision_id=decision_id,
             ticker=request.ticker,
             market_snapshot=request.snapshot,
-            events=[],
+            events=list(request.events),
             market_regime=request.regime,
             capital_context=capital,
             thesis=thesis,

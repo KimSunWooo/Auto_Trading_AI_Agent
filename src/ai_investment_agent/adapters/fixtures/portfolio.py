@@ -4,11 +4,25 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.policy import (
     HumanOverride,
     PortfolioContext,
     RiskBudgets,
 )
+
+
+def fixture_capital() -> CapitalContext:
+    return CapitalContext(
+        total_capital=Decimal("100000000"),
+        ai_capital_limit=Decimal("10000000"),
+        ai_capital_ratio=Decimal("0.10"),
+        long_term_budget=Decimal("7000000"),
+        short_term_budget=Decimal("3000000"),
+        reserve_cash=Decimal("20000000"),
+        risk_budget=Decimal("5000000"),
+        source="provided",
+    )
 
 
 def fixture_portfolio(

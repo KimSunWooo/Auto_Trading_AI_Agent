@@ -33,6 +33,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
+ruff check src tests
+python -m compileall src/ai_investment_agent
+```
+
+분석 API:
+
+```bash
+uvicorn ai_investment_agent.api.app:app --host 0.0.0.0 --port 43187
 ```
 
 ## 패키지 구조
@@ -56,8 +64,9 @@ src/ai_investment_agent/
   journal/       # Decision journal (모든 action 저장)
   evaluation/    # Offline quality / health / promotion path
   replay/        # replay(decisionId) + as-of 접근성 필터
-  health/        # process health + modelHealth (UNKNOWN ≠ HEALTHY)
-  api/           # HTTP는 이번 단계 미구현
+  health/        # process + component health (UNKNOWN ≠ HEALTHY)
+  analysis/      # Market Data → TradeProposal 파이프라인
+  api/           # FastAPI. 주문 라우트 없음
 ```
 
 ## Domain 의존 방향
@@ -223,5 +232,49 @@ Model Health metric interface: Win Rate, Expected Value, Drawdown, Sharpe, Calib
 ```
 Decision Logs → Offline Evaluation → Candidate Model → Backtest → Shadow → 승인 → New Version
 ```
+
+## Analysis API
+
+독립 서비스입니다. Auto-Trading-system과 연결하지 않습니다. 실제 주문 API는 없습니다.
+
+| Method | Path | 역할 |
+| --- | --- | --- |
+| POST | `/analysis/evaluate` | Fixture 데이터로 판단 파이프라인을 실행하고 TradeProposal을 저장 |
+| GET | `/decisions` | Journal에 저장된 판단 목록 |
+| GET | `/decisions/{decisionId}` | 단건 조회 |
+| POST | `/decisions/{decisionId}/replay` | 당시 snapshot과 version pin 복원 |
+| GET | `/health` | 컴포넌트별 health + 종합 상태 |
+
+만들지 않는 라우트: `POST /orders`, `/buy`, `/sell`, `/cancel`, `/broker/*`.
+
+1차 완성 흐름:
+
+```
+Market Data + External Event Data
+    → Normalization
+    → Event Intelligence
+    → Market Context
+    → Feature Engine
+    → Long/Short Analysis
+    → Horizon Selection
+    → Capital/Policy Assessment
+    → TradeProposal
+    → Decision Journal
+    → Replay/Evaluation
+```
+
+이 경로에서 실제 주문은 0건입니다.
+
+## Health
+
+`GET /health`는 다음을 구분합니다.
+
+- MarketDataHealth
+- ExternalDataHealth
+- ModelHealth
+- DatabaseHealth
+- EventPipelineHealth
+
+종합 상태: `HEALTHY` · `DEGRADED` · `UNHEALTHY` · `UNKNOWN`. `UNKNOWN`은 `HEALTHY`로 간주하지 않습니다. 컴포넌트 하나가 UNKNOWN이면 종합도 HEALTHY가 될 수 없습니다.
 
 
