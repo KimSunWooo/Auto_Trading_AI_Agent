@@ -58,6 +58,8 @@ from ai_investment_agent.domain.enums import (
     QualityAxis,
     RawPutResult,
     ReasonCode,
+    ShadowOrderStatus,
+    ShadowSide,
     SourceTier,
     Stance,
     VerificationStatus,
@@ -83,6 +85,16 @@ from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketS
 from ai_investment_agent.domain.market_feed import MarketDataRecord, OhlcvBar
 from ai_investment_agent.domain.proposal import TradeProposal
 from ai_investment_agent.domain.raw import RawRecord
+from ai_investment_agent.domain.shadow import (
+    ShadowCostModel,
+    ShadowExecutionResult,
+    ShadowFill,
+    ShadowMarketQuote,
+    ShadowOrder,
+    ShadowPortfolio,
+    ShadowPosition,
+    ShadowSkipRecord,
+)
 from ai_investment_agent.domain.serialization import from_json, to_json
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
 from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION, PROMPT_VERSION
@@ -160,6 +172,16 @@ __all__ = [
     "ReasonCode",
     "RiskBudgetUsage",
     "RiskBudgets",
+    "ShadowCostModel",
+    "ShadowExecutionResult",
+    "ShadowFill",
+    "ShadowMarketQuote",
+    "ShadowOrder",
+    "ShadowOrderStatus",
+    "ShadowPortfolio",
+    "ShadowPosition",
+    "ShadowSide",
+    "ShadowSkipRecord",
     "SourceTier",
     "ShortTermFeatures",
     "Stance",

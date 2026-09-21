@@ -39,6 +39,9 @@ def test_analysis_api_evaluate_list_get_replay_and_health():
     assert body["ordersPlaced"] == 0
     assert body["brokerCalled"] is False
     assert body["pipeline"] == list(PIPELINE_STAGES)
+    assert body["pipeline"][-1] == "SHADOW_EXECUTION"
+    assert body["shadowExecution"]["brokerCalled"] is False
+    assert body["shadowExecution"]["liveOrderPlaced"] is False
     decision_id = body["decisionId"]
 
     listed = client.get("/decisions")

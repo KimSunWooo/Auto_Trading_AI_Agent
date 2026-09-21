@@ -87,6 +87,15 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
         payload["status"] = report.status.value
         return JSONResponse(payload)
 
+    @app.get("/shadow/portfolio")
+    def shadow_portfolio() -> JSONResponse:
+        return JSONResponse(analysis.shadow.portfolio.model_dump(mode="json"))
+
+    @app.get("/shadow/performance")
+    def shadow_performance() -> JSONResponse:
+        report = analysis.shadow.performance(now=analysis._now())
+        return JSONResponse(report.model_dump(mode="json"))
+
     return app
 
 

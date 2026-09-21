@@ -48,11 +48,13 @@ from ai_investment_agent.domain.external_intelligence import IntelligenceRecord
 from ai_investment_agent.domain.journal import DecisionRecord
 from ai_investment_agent.domain.market import MarketEvent, MarketSnapshot
 from ai_investment_agent.domain.market_feed import MarketDataRecord
+from ai_investment_agent.domain.shadow import ShadowExecutionResult
 from ai_investment_agent.evaluation.health import ModelHealthAssessor
 from ai_investment_agent.evaluation.quality import QualityEvaluator
 from ai_investment_agent.features.engine import MarketContextEngine
 from ai_investment_agent.intelligence.pipeline import EventIntelligenceEngine
 from ai_investment_agent.replay.service import ReplayBundle, ReplayService
+from ai_investment_agent.shadow.service import ShadowTradingService
 
 FIXTURE_AS_OF = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
 
@@ -69,6 +71,7 @@ PIPELINE_STAGES = (
     "TRADE_PROPOSAL",
     "DECISION_JOURNAL",
     "REPLAY_READY",
+    "SHADOW_EXECUTION",
 )
 
 
@@ -85,6 +88,7 @@ class AnalysisResult(DomainModel):
     analyzed_event_count: int = 0
     orders_placed: Literal[0] = 0
     broker_called: Literal[False] = False
+    shadow_execution: ShadowExecutionResult | None = None
 
 
 class AnalysisService:
@@ -118,6 +122,7 @@ class AnalysisService:
         self.replay = ReplayService(self.repository)
         self.model_health = ModelHealthAssessor()
         self.quality = QualityEvaluator()
+        self.shadow = ShadowTradingService()
         self.last_market: CollectionResult[MarketDataRecord] | None = None
         self.last_external: CollectionResult[IntelligenceRecord] | None = None
         self.last_pipeline_error: str | None = None
@@ -193,6 +198,7 @@ class AnalysisService:
                 events=tuple(judgment_events),
             )
         )
+        shadow_result = self.shadow.apply_snapshot(judged)
         return AnalysisResult(
             decision_id=judged.decision_id,
             ticker=ticker,
@@ -206,6 +212,7 @@ class AnalysisService:
             analyzed_event_count=len(analyzed),
             orders_placed=0,
             broker_called=False,
+            shadow_execution=shadow_result,
         )
 
     def list_decisions(self) -> list[DecisionRecord]:

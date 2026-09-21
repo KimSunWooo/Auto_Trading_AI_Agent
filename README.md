@@ -66,6 +66,7 @@ src/ai_investment_agent/
   replay/        # replay(decisionId) + as-of 접근성 필터
   health/        # process + component health (UNKNOWN ≠ HEALTHY)
   analysis/      # Market Data → TradeProposal 파이프라인
+  shadow/        # AI 전용 가상 계좌 / 가상 체결. Broker entity 아님
   api/           # FastAPI. 주문 라우트 없음
 ```
 
@@ -87,6 +88,7 @@ domain → 표준 라이브러리 + pydantic  (adapter/SDK 금지)
 - `CapitalContext` (AI 한도 뷰. 전체 계좌 제어 아님)
 - `InvestmentThesis`, `TradeProposal`
 - `DecisionSnapshot`, `DecisionRecord`, `DecisionJournalEntry`
+- `ShadowOrder`, `ShadowFill`, `ShadowPosition`, `ShadowPortfolio` (가상 장부. Broker Order/Fill/Position이 아님)
 
 지원 Decision:
 
@@ -261,9 +263,73 @@ Market Data + External Event Data
     → TradeProposal
     → Decision Journal
     → Replay/Evaluation
+    → Shadow Execution
 ```
 
-이 경로에서 실제 주문은 0건입니다.
+이 경로에서 실제 주문은 0건입니다. Shadow Execution은 가상 체결만 만들고 live order로 바뀌는 코드 경로가 없습니다.
+
+## Shadow Trading
+
+AI 판단을 **가상 계좌**에서 평가하는 계층입니다. 실제 Broker / KIS / Auto-Trading-system을 사용하지 않습니다.
+
+### Shadow Portfolio
+
+AI 전용 가상 계좌입니다. 시작 현금은 `totalCapital`이 아니라 `aiCapitalLimit`입니다.
+
+- Initial Capital
+- AI Capital Limit
+- Cash
+- Positions (`ShadowPosition`)
+- Realized PnL
+- Unrealized PnL
+- Drawdown
+
+### Shadow Execution
+
+과거 또는 fixture Market Data로 가상 체결을 만듭니다. mid/current price만으로 체결하지 않습니다.
+
+반영하는 마찰:
+
+- spread (없으면 보수적 기본값 10bps. 0으로 두지 않음)
+- slippage (유동성이 낮으면 가산)
+- fees
+- tax (매도)
+- liquidity (점수 0.20 미만은 거부. 미지값은 1.0이 아니라 0.35)
+
+BUY 체결가는 mid보다 높고, SELL 체결가는 mid보다 낮습니다. `fillPrice == mid`인 `ShadowFill`은 만들 수 없습니다.
+
+`NO_TRADE` · `TACTICAL_WAIT` · `HOLD` · `EXIT_REVIEW`는 포지션을 열거나 강제 청산하지 않고 skip합니다. `EXIT_REVIEW`는 `FORCE_SELL`이 아닙니다.
+
+### 성과 축
+
+AI 판단과 Shadow 결과를 비교합니다.
+
+- Decision Quality
+- Capital Allocation
+- Drawdown / max drawdown
+- Risk-adjusted Return
+- NO_TRADE Performance (건너뛴 뒤 가격이 내리면 양수: 손실 회피)
+- Long vs Short Performance
+- Market Regime별 Performance
+
+`liveOrdersPlaced`는 항상 0입니다.
+
+### Broker 분리
+
+`ShadowOrder` / `ShadowFill` / `ShadowPosition`은 실제 주문 엔티티와 완전히 분리됩니다.
+
+- id prefix: `sho_` / `shf_` (broker id 아님)
+- `convertibleToBroker`는 항상 `false`이며 `true`로 설정할 수 없음
+- `to_broker` / `place_order` / `submit` 변환 메서드 없음
+
+조회 전용 HTTP:
+
+| Method | Path | 역할 |
+| --- | --- | --- |
+| GET | `/shadow/portfolio` | 가상 계좌 스냅샷 |
+| GET | `/shadow/performance` | 판단 vs Shadow 성과 |
+
+`POST /shadow/*` 주문 라우트는 없습니다.
 
 ## Health
 

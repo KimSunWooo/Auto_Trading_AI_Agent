@@ -23,5 +23,13 @@ def new_cluster_id() -> str:
     return f"ecl_{uuid4().hex}"
 
 
+def new_shadow_order_id() -> str:
+    return f"sho_{uuid4().hex}"
+
+
+def new_shadow_fill_id() -> str:
+    return f"shf_{uuid4().hex}"
+
+
 def is_decision_id(value: str) -> bool:
     return value.startswith("dec_") and len(value) == 36
