@@ -1,0 +1,15 @@
+{
+  "ticker": "005930",
+  "asOf": "2026-09-21T00:00:00+00:00",
+  "lastPrice": "71000",
+  "currency": "KRW",
+  "openPrice": "70500",
+  "highPrice": "71500",
+  "lowPrice": "70100",
+  "volume": "12000000",
+  "volatility": "0.18",
+  "liquidityScore": "0.8",
+  "dataCompleteness": "0.95",
+  "regimeHint": "SIDEWAYS",
+  "source": "fixture-known"
+}

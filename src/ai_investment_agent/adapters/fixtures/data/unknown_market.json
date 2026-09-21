@@ -1,0 +1,12 @@
+{
+  "ticker": "005930",
+  "asOf": "2026-09-21T00:00:00+00:00",
+  "lastPrice": null,
+  "currency": "KRW",
+  "volume": null,
+  "volatility": null,
+  "liquidityScore": null,
+  "dataCompleteness": "0.1",
+  "regimeHint": "UNKNOWN",
+  "source": "fixture-unknown"
+}

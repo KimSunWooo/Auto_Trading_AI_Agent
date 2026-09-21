@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "eventId": "evt_fixture_macro_001",
+      "ticker": "005930",
+      "eventType": "MACRO",
+      "title": "Fixture macro note. Not sourced from a live news API.",
+      "occurredAt": "2026-09-20T00:00:00+00:00",
+      "severity": "INFO",
+      "source": "fixture",
+      "payload": {}
+    }
+  ]
+}
