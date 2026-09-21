@@ -20,5 +20,5 @@ class UtilityConfig:
     stretched_extension: Decimal = Decimal("0.03")
     priced_in_wait: float = 0.70
     remaining_edge_wait: float = 0.20
-    bullish_score: float = 0.35
-    bearish_score: float = -0.35
+    bullish_score: float = 0.25
+    bearish_score: float = -0.25

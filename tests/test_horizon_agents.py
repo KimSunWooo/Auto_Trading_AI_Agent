@@ -78,4 +78,4 @@ def test_long_thesis_with_poor_entry_waits_instead_of_buy_now():
     assert ReasonCode.POOR_ENTRY.value in proposal.reason_codes
     assert ReasonCode.ENTRY_WAIT.value in proposal.reason_codes
     assert "earnings_recovery" in snapshot.thesis.drivers
-    assert "sector_breakdown" in snapshot.thesis.invalidations or snapshot.thesis.invalidations
+    assert "sector_breakdown" in snapshot.thesis.invalidations

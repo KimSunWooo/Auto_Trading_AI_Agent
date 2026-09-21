@@ -175,13 +175,16 @@ def _desired(selected: HorizonDecision, position_status: PositionThesisStatus) -
 
 def _thesis(ticker: str, long_view, short_view, selected: HorizonDecision) -> InvestmentThesis:
     drivers = list(long_view.drivers)
-    invalidations = list(long_view.invalidations)
+    invalidations = _merge(long_view.invalidations, LONG_WATCH_INVALIDATIONS)
     if selected.choice is HorizonChoice.SHORT_TERM:
         drivers = list(short_view.drivers)
-        invalidations = list(short_view.invalidations)
+        invalidations = _merge(short_view.invalidations, SHORT_WATCH_INVALIDATIONS)
     elif selected.choice is HorizonChoice.TACTICAL_WAIT and long_view.stance is Stance.BULLISH:
         drivers = list(long_view.drivers)
-        invalidations = list(long_view.invalidations) + list(short_view.invalidations)
+        invalidations = _merge(
+            list(long_view.invalidations) + list(short_view.invalidations),
+            LONG_WATCH_INVALIDATIONS,
+        )
     headline = f"{ticker} {selected.choice.value}"
     summary = (
         f"Long {long_view.stance.value}, short {short_view.stance.value}. "
@@ -210,6 +213,22 @@ def _thesis(ticker: str, long_view, short_view, selected: HorizonDecision) -> In
 
 def _num(value: Decimal | None) -> str | None:
     return None if value is None else str(value)
+
+
+LONG_WATCH_INVALIDATIONS = (
+    "earnings_downgrade",
+    "sector_breakdown",
+    "ma_breakdown",
+)
+SHORT_WATCH_INVALIDATIONS = (
+    "intraday_trend_down",
+    "short_momentum_down",
+    "low_liquidity",
+)
+
+
+def _merge(current: list[str], watches: tuple[str, ...]) -> list[str]:
+    return _unique(list(current) + list(watches))
 
 
 def _unique(values: list[str]) -> list[str]:
