@@ -33,7 +33,7 @@ def test_missing_conservative_factory_is_zero_not_open_ended():
     capital = CapitalContext.missing_conservative()
     assert capital.was_provided is False
     assert capital.deployable_capital == 0
-    dumped = capital.model_dump()
+    dumped = capital.model_dump(by_alias=False)
     numeric = [
         dumped["total_capital"],
         dumped["ai_capital_limit"],
