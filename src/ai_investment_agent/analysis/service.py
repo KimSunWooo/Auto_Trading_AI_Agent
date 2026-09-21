@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -54,7 +54,7 @@ from ai_investment_agent.features.engine import MarketContextEngine
 from ai_investment_agent.intelligence.pipeline import EventIntelligenceEngine
 from ai_investment_agent.replay.service import ReplayBundle, ReplayService
 
-FIXTURE_AS_OF = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
+FIXTURE_AS_OF = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
 
 PIPELINE_STAGES = (
     "MARKET_DATA",
@@ -279,7 +279,7 @@ def snapshot_from(ticker: str, as_of: datetime, records: list[MarketDataRecord])
         for value in (last_price, volume, volatility, liquidity)
         if value is not None
     )
-    completeness = Decimal("0") if not records else Decimal(str(min(1.0, 0.4 + 0.15 * present)))
+    completeness = Decimal(0) if not records else Decimal(str(min(1.0, 0.4 + 0.15 * present)))
     if last_price is not None:
         completeness = max(completeness, Decimal("0.7"))
     return MarketSnapshot(

@@ -71,18 +71,12 @@ def collect_health(service: AnalysisService) -> ServiceHealthReport:
         status=metrics.status,
         detail=_model_detail(metrics),
     )
-    try:
-        service.repository.list_snapshots()
-        database_status = ModelHealthStatus.HEALTHY
-        database_detail = "in-memory decision journal is reachable; not a broker database"
-    except Exception as exc:
-        database_status = ModelHealthStatus.UNHEALTHY
-        database_detail = str(exc)
     database_component = ComponentHealth(
         name="DatabaseHealth",
-        status=database_status,
-        detail=database_detail,
+        status=ModelHealthStatus.HEALTHY,
+        detail="in-memory decision journal is reachable; not a broker database",
     )
+    _ = service.repository.list_snapshots()
     if service.last_pipeline_error:
         pipeline_status = ModelHealthStatus.UNHEALTHY
         pipeline_detail = service.last_pipeline_error

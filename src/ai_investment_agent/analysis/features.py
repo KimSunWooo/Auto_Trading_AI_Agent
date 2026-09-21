@@ -64,7 +64,7 @@ def _signed_bias(direction: EventDirection, impact: float) -> Decimal:
         return Decimal(str(-impact))
     if direction is EventDirection.POSITIVE:
         return Decimal(str(impact))
-    return Decimal("0")
+    return Decimal(0)
 
 
 def _decimal(value: float | None) -> Decimal | None:
