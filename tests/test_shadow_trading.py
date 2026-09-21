@@ -399,5 +399,8 @@ def test_shadow_read_api_is_not_an_order_route():
     assert book["convertibleToBroker"] is False
     report = client.get("/shadow/performance")
     assert report.status_code == 200
-    assert report.json()["liveOrdersPlaced"] == 0
+    payload = report.json()
+    assert payload["liveOrdersPlaced"] == 0
+    if body["action"] in {"NO_TRADE", "TACTICAL_WAIT"}:
+        assert payload["noTradePerformance"]["status"] == "INSUFFICIENT_SAMPLE"
     assert client.post("/shadow/portfolio").status_code == 405

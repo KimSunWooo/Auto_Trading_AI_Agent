@@ -59,7 +59,7 @@ class ShadowTradingService:
             skip=skip,
             realized_pnl_delta=result.portfolio.realized_pnl - before_realized,
         )
-        if market_quote is not None:
+        if market_quote is not None and result.fill is not None:
             self.tracker.note_mids({market_quote.ticker: market_quote.mid})
         return result
 
