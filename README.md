@@ -45,7 +45,7 @@ src/ai_investment_agent/
   ports/         # MarketData, Event, LLM, Repository, Publisher, Collectors
   adapters/      # Fixture / in-memory 구현만 존재
   collectors/    # Market Data vs External Intelligence (fixtures; explicit status)
-  intelligence/  # 이번 단계는 fixture regime assessor
+  intelligence/  # Event Intelligence + fixture regime assessor
   features/      # 이후 단계
   scanner/       # 이후 단계
   agents/        # JudgmentAgent 오케스트레이션
@@ -102,4 +102,21 @@ Every collected record carries `eventOccurredAt`, `publishedAt`, `sourceReceived
 Collectors return an explicit `CollectionStatus`. `NO_EVENT` (successful empty feed) is not `DATA_UNAVAILABLE` (API/feed failure). Empty arrays are never implied success.
 
 Freshness classes: `ULTRA_FAST`, `INTRADAY`, `DAILY`, `LONG_HORIZON`.
+
+## Event Intelligence
+
+수집된 뉴스/공시/거시 문서는 감성점수가 아니라 **시장 사건**으로 변환됩니다. 이 단계는 매수/매도 결정을 하지 않습니다.
+
+```
+Raw Event → Parser → Sanitizer → Normalizer → Deduplication
+  → Entity Extraction → Source Trust → Verification → Impact Analysis
+  → AnalyzedMarketEvent
+```
+
+- 기사 수 ≠ 사건 수. 같은 사건은 `EventCluster`로 묶습니다.
+- Embedding은 `EmbeddingProvider` 포트로 추상화되어 있고, 현재는 hashed bag fixture입니다.
+- Source trust 티어 S–D는 `policy/source_trust.py`에 하드코딩되어 있습니다.
+- 정정보도는 이벤트를 삭제하지 않고 `verificationStatus=RETRACTED`로 바꿉니다.
+- 외부 문서는 항상 untrusted data입니다. Raw 텍스트를 LLM instruction에 붙이지 않습니다.
+- 방향 증거가 없으면 `UNKNOWN`이며 POSITIVE/NEGATIVE로 강제하지 않습니다.
 

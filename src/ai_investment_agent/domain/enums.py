@@ -138,3 +138,42 @@ class CorporateActionType(str, Enum):
 class RawPutResult(str, Enum):
     STORED = "STORED"
     DUPLICATE = "DUPLICATE"
+
+
+class EventCategory(str, Enum):
+    MACRO = "MACRO"
+    GEOPOLITICAL = "GEOPOLITICAL"
+    CORPORATE = "CORPORATE"
+    INDUSTRY = "INDUSTRY"
+    MARKET = "MARKET"
+
+
+class EventDirection(str, Enum):
+    POSITIVE = "POSITIVE"
+    NEGATIVE = "NEGATIVE"
+    MIXED = "MIXED"
+    UNKNOWN = "UNKNOWN"
+
+
+class VerificationStatus(str, Enum):
+    VERIFIED = "VERIFIED"
+    PARTIALLY_VERIFIED = "PARTIALLY_VERIFIED"
+    UNVERIFIED = "UNVERIFIED"
+    RETRACTED = "RETRACTED"
+
+
+class ImpactHorizon(str, Enum):
+    MINUTES = "MINUTES"
+    HOURS = "HOURS"
+    DAYS = "DAYS"
+    WEEKS = "WEEKS"
+    MONTHS = "MONTHS"
+    YEARS = "YEARS"
+
+
+class SourceTier(str, Enum):
+    S = "S"
+    A = "A"
+    B = "B"
+    C = "C"
+    D = "D"
