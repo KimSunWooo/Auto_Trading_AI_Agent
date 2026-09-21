@@ -26,15 +26,19 @@ from ai_investment_agent.domain.enums import (
     Horizon,
     HorizonChoice,
     JournalStage,
+    KillSwitchLevel,
     PositionThesisStatus,
+    PolicyState,
     Stance,
 )
 from ai_investment_agent.domain.ids import new_decision_id
 from ai_investment_agent.domain.market import MarketRegime, MarketSnapshot
+from ai_investment_agent.domain.policy import HumanOverride, PortfolioContext, RiskBudgets
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
 from ai_investment_agent.horizon.selector import HorizonSelector
 from ai_investment_agent.journal.service import JournalService
 from ai_investment_agent.policy.priorities import PRIORITY_ORDER
+from ai_investment_agent.policy.safety import SafetyPolicyLayer
 from ai_investment_agent.policy.utility import UtilityConfig
 from ai_investment_agent.ports.publisher import DecisionPublisher
 from ai_investment_agent.ports.repository import DecisionRepository
@@ -50,6 +54,11 @@ class InvestmentJudgmentRequest:
     capital_context: CapitalContext | None = None
     entry: EntrySnapshot | None = None
     position: FixturePosition | None = None
+    portfolio_context: PortfolioContext | None = None
+    human_override: HumanOverride | None = None
+    risk_budgets: RiskBudgets | None = None
+    policy_state: PolicyState = PolicyState.NORMAL
+    kill_switch_level: KillSwitchLevel = KillSwitchLevel.LEVEL_0_NORMAL
 
 
 class InvestmentJudgmentAgent:
@@ -70,6 +79,7 @@ class InvestmentJudgmentAgent:
         self._positions = PositionThesisMonitor()
         self._capital = CapitalPolicy()
         self._engine = DecisionEngine(self._capital)
+        self._safety = SafetyPolicyLayer()
         self._repository = repository
         self._publisher = publisher
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
@@ -134,8 +144,17 @@ class InvestmentJudgmentAgent:
                 invalidation_conditions=tuple(conditions),
             )
         )
-        proposal = output.proposal.model_copy(
-            update={"reason_codes": _unique(output.reason_codes + selected.reason_codes)}
+        proposal = self._safety.apply(
+            output.proposal,
+            capital=capital,
+            portfolio=request.portfolio_context,
+            risk_budgets=request.risk_budgets,
+            human=request.human_override,
+            policy_state=request.policy_state,
+            kill_switch=request.kill_switch_level,
+        )
+        proposal = proposal.model_copy(
+            update={"reason_codes": _unique(proposal.reason_codes + selected.reason_codes)}
         )
         record = DecisionSnapshot(
             decision_id=decision_id,

@@ -9,12 +9,14 @@ from ai_investment_agent.capital.policy import CapitalPolicy
 from ai_investment_agent.decision.engine import DecisionEngine, DecisionInput
 from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.decision import DecisionSnapshot
-from ai_investment_agent.domain.enums import DecisionType, JournalStage
+from ai_investment_agent.domain.enums import DecisionType, JournalStage, KillSwitchLevel, PolicyState
 from ai_investment_agent.domain.ids import new_decision_id
+from ai_investment_agent.domain.policy import HumanOverride, PortfolioContext, RiskBudgets
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
 from ai_investment_agent.intelligence.regime import RegimeAssessor
 from ai_investment_agent.journal.service import JournalService
 from ai_investment_agent.policy.priorities import PRIORITY_ORDER
+from ai_investment_agent.policy.safety import SafetyPolicyLayer
 from ai_investment_agent.ports.events import EventProvider
 from ai_investment_agent.ports.llm import LlmProvider, LlmRequest
 from ai_investment_agent.ports.market_data import MarketDataProvider
@@ -26,6 +28,11 @@ from ai_investment_agent.ports.repository import DecisionRepository
 class JudgmentRequest:
     ticker: str
     capital_context: CapitalContext | None = None
+    portfolio_context: PortfolioContext | None = None
+    human_override: HumanOverride | None = None
+    risk_budgets: RiskBudgets | None = None
+    policy_state: PolicyState = PolicyState.NORMAL
+    kill_switch_level: KillSwitchLevel = KillSwitchLevel.LEVEL_0_NORMAL
 
 
 class JudgmentAgent:
@@ -51,6 +58,7 @@ class JudgmentAgent:
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._capital_policy = CapitalPolicy()
         self._engine = DecisionEngine(self._capital_policy)
+        self._safety = SafetyPolicyLayer()
         self._regime = RegimeAssessor()
         self._journal = JournalService(repository, self._now)
 
@@ -124,11 +132,20 @@ class JudgmentAgent:
                 invalidation_conditions=tuple(conditions),
             )
         )
+        proposal = self._safety.apply(
+            output.proposal,
+            capital=capital,
+            portfolio=request.portfolio_context,
+            risk_budgets=request.risk_budgets,
+            human=request.human_override,
+            policy_state=request.policy_state,
+            kill_switch=request.kill_switch_level,
+        )
         self._journal.record(
             decision_id,
             JournalStage.DECISION,
-            f"Decision resolved to {output.decision.value}.",
-            reason_codes=output.reason_codes,
+            f"Decision resolved to {proposal.decision.value}.",
+            reason_codes=proposal.reason_codes,
         )
 
         record = DecisionSnapshot(
@@ -139,18 +156,18 @@ class JudgmentAgent:
             market_regime=regime,
             capital_context=capital,
             thesis=thesis,
-            proposal=output.proposal,
+            proposal=proposal,
             priorities_applied=list(PRIORITY_ORDER),
             created_at=now,
         )
         self._repository.save_snapshot(record)
-        self._publisher.publish(output.proposal)
+        self._publisher.publish(proposal)
         self._journal.record(
             decision_id,
             JournalStage.TRADE_PROPOSAL,
             "Published TradeProposal. No order was created.",
-            reason_codes=output.proposal.reason_codes,
-            payload={"decisionId": decision_id, "action": output.proposal.action.value},
+            reason_codes=proposal.reason_codes,
+            payload={"decisionId": decision_id, "action": proposal.action.value},
         )
         return record
 

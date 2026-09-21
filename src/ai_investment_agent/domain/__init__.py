@@ -1,6 +1,14 @@
 """Core domain models. This layer has no adapter, SDK, or I/O imports."""
 
 from ai_investment_agent.domain.capital import CapitalContext
+from ai_investment_agent.domain.policy import (
+    FixturePositionSlice,
+    HumanOverride,
+    PolicyResult,
+    PortfolioContext,
+    RiskBudgetUsage,
+    RiskBudgets,
+)
 from ai_investment_agent.domain.collection import (
     CollectionResult,
     CollectionTimestamps,
@@ -26,6 +34,9 @@ from ai_investment_agent.domain.context import (
 from ai_investment_agent.domain.enums import (
     Action,
     AgentPriority,
+    KillSwitchLevel,
+    PolicyAction,
+    PolicyState,
     CollectionStatus,
     ContextSignal,
     CorporateActionType,
@@ -86,12 +97,15 @@ __all__ = [
     "EventImpactFeatures",
     "ExtractedEntities",
     "FixturePosition",
+    "FixturePositionSlice",
     "FEATURE_VERSION",
     "FreshnessClass",
     "Horizon",
     "HorizonChoice",
     "HorizonDecision",
+    "HumanOverride",
     "ImpactHorizon",
+    "KillSwitchLevel",
     "IntelligenceKind",
     "IntelligenceRecord",
     "InvalidationCondition",
@@ -109,11 +123,17 @@ __all__ = [
     "MarketSnapshot",
     "OhlcvBar",
     "POLICY_VERSION",
+    "PolicyAction",
+    "PolicyResult",
+    "PolicyState",
+    "PortfolioContext",
     "QuantitativeFeatures",
     "RawEvent",
     "RawPutResult",
     "RawRecord",
     "ReasonCode",
+    "RiskBudgetUsage",
+    "RiskBudgets",
     "SourceTier",
     "ShortTermFeatures",
     "Stance",

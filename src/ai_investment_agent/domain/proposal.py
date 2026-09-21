@@ -9,6 +9,7 @@ from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.enums import Action, DecisionType, Horizon
 from ai_investment_agent.domain.errors import InvalidDecisionError
 from ai_investment_agent.domain.market import MarketRegime
+from ai_investment_agent.domain.policy import PolicyResult
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
 from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION
 
@@ -43,6 +44,7 @@ class TradeProposal(DomainModel):
     feature_version: str = FEATURE_VERSION
     policy_version: str = POLICY_VERSION
     generated_at: datetime
+    policy_result: PolicyResult | None = None
 
     @property
     def decision(self) -> DecisionType:

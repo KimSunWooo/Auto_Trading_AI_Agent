@@ -52,7 +52,7 @@ src/ai_investment_agent/
   agents/        # LongTermAgent, ShortTermAgent, InvestmentJudgmentAgent
   decision/      # 순수 DecisionEngine
   capital/       # CapitalContext 해석. 누락 시 0, 무한 자금 아님
-  policy/        # 하드 게이트 (UNKNOWN → NO_TRADE)
+  policy/        # 하드 게이트 + SafetyPolicyLayer (Proposal만 제한)
   journal/       # Decision journal
   evaluation/    # 이후 단계
   replay/        # as-of 접근성 필터 (look-ahead 방지)
@@ -88,6 +88,48 @@ domain → 표준 라이브러리 + pydantic  (adapter/SDK 금지)
 `CapitalContext`가 없으면 자금이 무한하다고 보지 않습니다. 모든 한도를 0으로 두는 conservative default를 쓰고, 신규 BUY는 `NO_TRADE`가 됩니다.
 
 UNKNOWN 레짐은 `NO_TRADE`입니다.
+
+## Capital / Policy / Safety Decision Layer
+
+AI가 만든 `TradeProposal`을 **허용 / 축소 / 보류 / 거절**하는 AI-side Policy Layer입니다. Broker RiskManager가 아니며, 실제 주문을 막거나 거래 시스템을 멈추지 않습니다. 결과는 Proposal의 `policyResult`로만 남습니다.
+
+자금 계층:
+
+```
+Total Capital
+    ↓
+AI Capital Limit     ← AI는 이 밖을 쓸 수 없음
+    ↓
+Long Budget / Short Budget / Reserve Cash
+```
+
+Capital Limit(투입 가능 최대 자금)과 Risk Budget(허용 손실 규모)은 분리되어 있습니다. Risk 버킷 구조: AI Drawdown, Daily Loss, Per-position, Sector, Theme, Country, Currency, Correlation, Stress Correlation, Tail, Liquidity.
+
+현재 단계는 실제 자동매매 Portfolio를 읽지 않습니다. `PortfolioContext.source`는 `fixture`만 허용합니다.
+
+Policy 상태: `NORMAL` · `REDUCED_EXPOSURE` · `NO_NEW_BUY` · `AI_DISABLED` · `UNKNOWN`.
+
+Kill switch (Proposal 결과 전용):
+
+| Level | 의미 | Proposal |
+| --- | --- | --- |
+| 0 | NORMAL | 그대로 평가 |
+| 1 | NO_NEW_BUY | 신규 BUY 거절 |
+| 2 | REDUCE_EXPOSURE | 노출 축소 |
+| 3 | AI_DISABLED | `NO_TRADE` |
+| 4 | ALL_TRADING_DISABLED | `NO_TRADE` |
+
+`ALL_TRADING_DISABLED`는 `FORCE_SELL_ALL`이 아닙니다. Level 4는 청산 지시가 아니라 거래 제안 중단입니다. `PolicyResult.forceSellAll`은 항상 `false`입니다.
+
+Human Override는 외부에서만 주입합니다. AI가 변경할 API가 없고 `HumanOverride`는 frozen입니다.
+
+- `AI_ENABLED`
+- `LONG_AGENT_ENABLED`
+- `SHORT_AGENT_ENABLED`
+- `SYMBOL_BLACKLIST`
+- `SECTOR_BLACKLIST`
+
+UNKNOWN Policy는 신규 BUY를 불허하고 `TACTICAL_WAIT`(보류)로 바꿉니다.
 
 ## Collection layer
 
