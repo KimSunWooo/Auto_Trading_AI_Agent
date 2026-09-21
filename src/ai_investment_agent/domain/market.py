@@ -43,3 +43,13 @@ class MarketRegime(DomainModel):
     as_of: datetime
     explanation: str
     detected_from: str = "fixture"
+    flags: list[MarketRegimeType] = Field(default_factory=list)
+
+    @property
+    def is_unknown(self) -> bool:
+        return self.regime is MarketRegimeType.UNKNOWN
+
+    @property
+    def treated_as_safe(self) -> bool:
+        """UNKNOWN is never normal or safe."""
+        return self.regime is not MarketRegimeType.UNKNOWN

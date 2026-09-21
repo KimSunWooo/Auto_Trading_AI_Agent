@@ -9,10 +9,17 @@ from ai_investment_agent.domain.collection import (
 )
 from ai_investment_agent.domain.corporate_action import CorporateAction
 from ai_investment_agent.domain.decision import DecisionSnapshot
+from ai_investment_agent.domain.context import (
+    EventImpactFeatures,
+    MacroSurprise,
+    MarketContext,
+    QuantitativeFeatures,
+)
 from ai_investment_agent.domain.enums import (
     Action,
     AgentPriority,
     CollectionStatus,
+    ContextSignal,
     CorporateActionType,
     DecisionType,
     EventCategory,
@@ -54,6 +61,7 @@ __all__ = [
     "CollectionResult",
     "CollectionStatus",
     "CollectionTimestamps",
+    "ContextSignal",
     "CorporateAction",
     "CorporateActionType",
     "DecisionJournalEntry",
@@ -63,6 +71,7 @@ __all__ = [
     "EventCluster",
     "EventDirection",
     "EventSeverity",
+    "EventImpactFeatures",
     "ExtractedEntities",
     "FEATURE_VERSION",
     "FreshnessClass",
@@ -73,6 +82,8 @@ __all__ = [
     "InvalidationCondition",
     "InvestmentThesis",
     "JournalStage",
+    "MacroSurprise",
+    "MarketContext",
     "MODEL_VERSION",
     "MarketDataKind",
     "MarketDataRecord",
@@ -82,6 +93,7 @@ __all__ = [
     "MarketSnapshot",
     "OhlcvBar",
     "POLICY_VERSION",
+    "QuantitativeFeatures",
     "RawEvent",
     "RawPutResult",
     "RawRecord",

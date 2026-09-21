@@ -46,7 +46,7 @@ src/ai_investment_agent/
   adapters/      # Fixture / in-memory 구현만 존재
   collectors/    # Market Data vs External Intelligence (fixtures; explicit status)
   intelligence/  # Event Intelligence + fixture regime assessor
-  features/      # 이후 단계
+  features/      # deterministic Market Context / Feature Engine
   scanner/       # 이후 단계
   agents/        # JudgmentAgent 오케스트레이션
   horizon/       # LONG_TERM / SHORT_TERM 매핑
@@ -119,4 +119,21 @@ Raw Event → Parser → Sanitizer → Normalizer → Deduplication
 - 정정보도는 이벤트를 삭제하지 않고 `verificationStatus=RETRACTED`로 바꿉니다.
 - 외부 문서는 항상 untrusted data입니다. Raw 텍스트를 LLM instruction에 붙이지 않습니다.
 - 방향 증거가 없으면 `UNKNOWN`이며 POSITIVE/NEGATIVE로 강제하지 않습니다.
+
+## Market Context / Features
+
+Market Data와 Event Intelligence를 **판단 입력**으로 바꿉니다. 이 단계는 BUY/SELL Proposal을 만들지 않습니다.
+
+정량 지표(Return, MA, Momentum, Volatility, Drawdown, Volume Ratio, Liquidity, Trend, Relative Strength, Time Decay)는 LLM이 아니라 deterministic code로 계산합니다.
+
+Event effectiveImpact:
+
+`rawImpact × sourceTrust × relevance × novelty × confidence × timeDecay`
+
+계수는 `policy/feature_config.py`의 `EventImpactWeights`로 바꿉니다. 기본 지수는 모두 1이라 위 곱과 같습니다.
+
+- UNKNOWN 레짐은 정상/안전으로 보지 않습니다.
+- Macro surprise는 actual과 consensus가 있을 때만 계산하며, 빈 값을 추측하지 않습니다.
+- Priced-in은 `PricedInAnalyzer` 포트로 교체 가능한 heuristic입니다.
+- Positive event + 강한 음수 시장 반응이면 `EVENT_MARKET_DIVERGENCE`를 만들고 event confidence를 낮춥니다.
 
