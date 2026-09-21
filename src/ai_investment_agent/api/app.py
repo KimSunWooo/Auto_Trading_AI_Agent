@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ai_investment_agent.analysis.service import AnalysisService
 from ai_investment_agent.domain.base import DomainModel
+from ai_investment_agent.domain.enums import ModelHealthStatus
 from ai_investment_agent.domain.errors import DecisionNotFoundError
 from ai_investment_agent.health.report import collect_health
 
@@ -79,9 +80,8 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
     def health_endpoint() -> JSONResponse:
         report = collect_health(analysis)
         payload = report.model_dump(mode="json")
-        payload["modelHealth"] = report.model_health.status.value
         payload["modelHealthTreatedAsHealthy"] = (
-            report.model_health.status.value == "HEALTHY"
+            report.model_health.status is ModelHealthStatus.HEALTHY
         )
         payload["unknownIsHealthy"] = False
         payload["status"] = report.status.value
