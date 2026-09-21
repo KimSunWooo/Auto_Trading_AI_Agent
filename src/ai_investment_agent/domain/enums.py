@@ -73,3 +73,68 @@ class ReasonCode(str, Enum):
     FIXTURE_DECISION = "FIXTURE_DECISION"
     BUY_REQUIRES_HORIZON = "BUY_REQUIRES_HORIZON"
     LOW_DATA_COMPLETENESS = "LOW_DATA_COMPLETENESS"
+
+
+class CollectionStatus(str, Enum):
+    """Explicit collector outcomes. Empty items are never implied success.
+
+    NO_EVENT: the collector ran and there were genuinely no events.
+    DATA_UNAVAILABLE: the collector failed (API/timeout/missing feed).
+    These two must never be treated as the same.
+    """
+
+    OK = "OK"
+    NO_EVENT = "NO_EVENT"
+    DATA_UNAVAILABLE = "DATA_UNAVAILABLE"
+    STALE = "STALE"
+
+
+class FreshnessClass(str, Enum):
+    ULTRA_FAST = "ULTRA_FAST"
+    INTRADAY = "INTRADAY"
+    DAILY = "DAILY"
+    LONG_HORIZON = "LONG_HORIZON"
+
+
+class MarketDataKind(str, Enum):
+    OHLCV = "OHLCV"
+    CURRENT_PRICE = "CURRENT_PRICE"
+    VOLUME = "VOLUME"
+    INDEX = "INDEX"
+    FX = "FX"
+    RATES = "RATES"
+    COMMODITY = "COMMODITY"
+    VOLATILITY = "VOLATILITY"
+    LIQUIDITY = "LIQUIDITY"
+
+
+class IntelligenceKind(str, Enum):
+    CORPORATE_DISCLOSURE = "CORPORATE_DISCLOSURE"
+    DOMESTIC_NEWS = "DOMESTIC_NEWS"
+    FOREIGN_NEWS = "FOREIGN_NEWS"
+    CENTRAL_BANK = "CENTRAL_BANK"
+    GOVERNMENT_POLICY = "GOVERNMENT_POLICY"
+    ECONOMIC_INDICATOR = "ECONOMIC_INDICATOR"
+    GEOPOLITICS = "GEOPOLITICS"
+    INDUSTRY_EVENT = "INDUSTRY_EVENT"
+    CORPORATE_EVENT = "CORPORATE_EVENT"
+
+
+class CorporateActionType(str, Enum):
+    DIVIDEND = "DIVIDEND"
+    EX_DIVIDEND = "EX_DIVIDEND"
+    SPLIT = "SPLIT"
+    REVERSE_SPLIT = "REVERSE_SPLIT"
+    MERGE = "MERGE"
+    RIGHTS_ISSUE = "RIGHTS_ISSUE"
+    BONUS_ISSUE = "BONUS_ISSUE"
+    RIGHTS_OFF = "RIGHTS_OFF"
+    TRADING_HALT = "TRADING_HALT"
+    DELISTING = "DELISTING"
+    MERGER = "MERGER"
+    TICKER_CHANGE = "TICKER_CHANGE"
+
+
+class RawPutResult(str, Enum):
+    STORED = "STORED"
+    DUPLICATE = "DUPLICATE"

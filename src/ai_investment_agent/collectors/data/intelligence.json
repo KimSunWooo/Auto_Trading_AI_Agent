@@ -1,0 +1,181 @@
+{
+  "records": [
+    {
+      "recordId": "int_disclosure_005930",
+      "kind": "CORPORATE_DISCLOSURE",
+      "ticker": "005930",
+      "headline": "Fixture annual report filing. Not sourced from DART.",
+      "body": "Fixture body only.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-20T12:00:00+00:00",
+        "publishedAt": "2026-09-20T12:00:00+00:00",
+        "sourceReceivedAt": "2026-09-20T12:00:10+00:00",
+        "collectedAt": "2026-09-20T12:00:12+00:00",
+        "normalizedAt": "2026-09-20T12:00:12+00:00",
+        "analyzedAt": "2026-09-20T12:00:20+00:00",
+        "tradableAt": "2026-09-20T12:00:10+00:00"
+      },
+      "freshnessClass": "DAILY",
+      "source": "fixture-disclosure",
+      "language": "ko",
+      "country": "KR"
+    },
+    {
+      "recordId": "int_news_domestic_005930",
+      "kind": "DOMESTIC_NEWS",
+      "ticker": "005930",
+      "headline": "Fixture domestic news item. Not a live news wire.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T07:00:00+00:00",
+        "publishedAt": "2026-09-21T07:05:00+00:00",
+        "sourceReceivedAt": "2026-09-21T07:05:05+00:00",
+        "collectedAt": "2026-09-21T07:05:06+00:00",
+        "normalizedAt": "2026-09-21T07:05:07+00:00",
+        "analyzedAt": "2026-09-21T07:05:08+00:00",
+        "tradableAt": "2026-09-21T07:05:05+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "source": "fixture-news-kr",
+      "language": "ko",
+      "country": "KR"
+    },
+    {
+      "recordId": "int_news_foreign_005930",
+      "kind": "FOREIGN_NEWS",
+      "ticker": "005930",
+      "headline": "Fixture foreign news item. Not a live news wire.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T06:00:00+00:00",
+        "publishedAt": "2026-09-21T06:10:00+00:00",
+        "sourceReceivedAt": "2026-09-21T06:10:05+00:00",
+        "collectedAt": "2026-09-21T06:10:06+00:00",
+        "normalizedAt": "2026-09-21T06:10:07+00:00",
+        "analyzedAt": "2026-09-21T06:10:08+00:00",
+        "tradableAt": "2026-09-21T06:10:05+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "source": "fixture-news-us",
+      "language": "en",
+      "country": "US"
+    },
+    {
+      "recordId": "int_news_lookahead_trap",
+      "kind": "FOREIGN_NEWS",
+      "ticker": "005930",
+      "headline": "Event occurred in the past but was published after as_of. Must be excluded.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-10T00:00:00+00:00",
+        "publishedAt": "2026-09-25T06:00:00+00:00",
+        "sourceReceivedAt": "2026-09-25T06:00:05+00:00",
+        "collectedAt": "2026-09-25T06:00:06+00:00",
+        "normalizedAt": "2026-09-25T06:00:07+00:00",
+        "analyzedAt": "2026-09-25T06:00:08+00:00",
+        "tradableAt": "2026-09-25T06:00:05+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "source": "fixture-news-us",
+      "language": "en",
+      "country": "US"
+    },
+    {
+      "recordId": "int_central_bank",
+      "kind": "CENTRAL_BANK",
+      "headline": "Fixture central bank statement. Not a live BOK/Fed feed.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-18T06:00:00+00:00",
+        "publishedAt": "2026-09-18T06:00:00+00:00",
+        "sourceReceivedAt": "2026-09-18T06:00:30+00:00",
+        "collectedAt": "2026-09-18T06:00:31+00:00",
+        "normalizedAt": "2026-09-18T06:00:32+00:00",
+        "analyzedAt": "2026-09-18T06:01:00+00:00",
+        "tradableAt": "2026-09-18T06:00:30+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "source": "fixture-macro",
+      "country": "KR"
+    },
+    {
+      "recordId": "int_gov_policy",
+      "kind": "GOVERNMENT_POLICY",
+      "headline": "Fixture government policy note.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-15T00:00:00+00:00",
+        "publishedAt": "2026-09-15T01:00:00+00:00",
+        "sourceReceivedAt": "2026-09-15T01:00:10+00:00",
+        "collectedAt": "2026-09-15T01:00:11+00:00",
+        "normalizedAt": "2026-09-15T01:00:12+00:00",
+        "analyzedAt": "2026-09-15T01:00:20+00:00",
+        "tradableAt": "2026-09-15T01:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "source": "fixture-macro",
+      "country": "KR"
+    },
+    {
+      "recordId": "int_econ_indicator",
+      "kind": "ECONOMIC_INDICATOR",
+      "headline": "Fixture CPI print. Not a live statistics feed.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T00:00:00+00:00",
+        "publishedAt": "2026-09-21T00:00:00+00:00",
+        "sourceReceivedAt": "2026-09-21T00:00:05+00:00",
+        "collectedAt": "2026-09-21T00:00:06+00:00",
+        "normalizedAt": "2026-09-21T00:00:07+00:00",
+        "analyzedAt": "2026-09-21T00:00:08+00:00",
+        "tradableAt": "2026-09-21T00:00:05+00:00"
+      },
+      "freshnessClass": "DAILY",
+      "source": "fixture-macro",
+      "country": "KR"
+    },
+    {
+      "recordId": "int_geopolitics",
+      "kind": "GEOPOLITICS",
+      "headline": "Fixture geopolitics brief.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-12T00:00:00+00:00",
+        "publishedAt": "2026-09-12T03:00:00+00:00",
+        "sourceReceivedAt": "2026-09-12T03:00:10+00:00",
+        "collectedAt": "2026-09-12T03:00:11+00:00",
+        "normalizedAt": "2026-09-12T03:00:12+00:00",
+        "analyzedAt": "2026-09-12T03:00:20+00:00",
+        "tradableAt": "2026-09-12T03:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "source": "fixture-macro"
+    },
+    {
+      "recordId": "int_industry_event",
+      "kind": "INDUSTRY_EVENT",
+      "headline": "Fixture semiconductor industry conference.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T01:00:00+00:00",
+        "publishedAt": "2026-09-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-09-01T00:00:10+00:00",
+        "collectedAt": "2026-09-01T00:00:11+00:00",
+        "normalizedAt": "2026-09-01T00:00:12+00:00",
+        "analyzedAt": "2026-09-01T00:00:20+00:00",
+        "tradableAt": "2026-09-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "source": "fixture-calendar"
+    },
+    {
+      "recordId": "int_corporate_event_005930",
+      "kind": "CORPORATE_EVENT",
+      "ticker": "005930",
+      "headline": "Fixture earnings-call calendar entry.",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T05:00:00+00:00",
+        "publishedAt": "2026-09-10T00:00:00+00:00",
+        "sourceReceivedAt": "2026-09-10T00:00:10+00:00",
+        "collectedAt": "2026-09-10T00:00:11+00:00",
+        "normalizedAt": "2026-09-10T00:00:12+00:00",
+        "analyzedAt": "2026-09-10T00:00:20+00:00",
+        "tradableAt": "2026-09-10T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "source": "fixture-calendar"
+    }
+  ]
+}

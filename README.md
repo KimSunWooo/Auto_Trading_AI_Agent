@@ -42,9 +42,9 @@ Python 패키지명 충돌을 피하기 위해 루트는 `src/ai_investment_agen
 ```
 src/ai_investment_agent/
   domain/        # 모델, 규칙, 직렬화. 바깥 계층을 import하지 않음
-  ports/         # MarketData, Event, LLM, Repository, Publisher
+  ports/         # MarketData, Event, LLM, Repository, Publisher, Collectors
   adapters/      # Fixture / in-memory 구현만 존재
-  collectors/    # 이후 단계 (실데이터 수집)
+  collectors/    # Market Data vs External Intelligence (fixtures; explicit status)
   intelligence/  # 이번 단계는 fixture regime assessor
   features/      # 이후 단계
   scanner/       # 이후 단계
@@ -55,7 +55,7 @@ src/ai_investment_agent/
   policy/        # 하드 게이트 (UNKNOWN → NO_TRADE)
   journal/       # Decision journal
   evaluation/    # 이후 단계
-  replay/        # 이후 단계
+  replay/        # as-of 접근성 필터 (look-ahead 방지)
   health/        # 판단 전용 모드 상태
   api/           # HTTP는 이번 단계 미구현
 ```
@@ -73,7 +73,8 @@ domain → 표준 라이브러리 + pydantic  (adapter/SDK 금지)
 
 ## 핵심 모델
 
-- `MarketSnapshot`, `MarketEvent`, `MarketRegime`
+- `MarketSnapshot`, `MarketEvent`, `MarketRegime` (판단 계층; 수집 계층과 분리)
+- `MarketDataRecord` / `IntelligenceRecord` / `CorporateAction` (수집 계층)
 - `CapitalContext` (AI 한도 뷰. 전체 계좌 제어 아님)
 - `InvestmentThesis`, `TradeProposal`
 - `DecisionSnapshot`, `DecisionJournalEntry`
@@ -87,3 +88,18 @@ domain → 표준 라이브러리 + pydantic  (adapter/SDK 금지)
 `CapitalContext`가 없으면 자금이 무한하다고 보지 않습니다. 모든 한도를 0으로 두는 conservative default를 쓰고, 신규 BUY는 `NO_TRADE`가 됩니다.
 
 UNKNOWN 레짐은 `NO_TRADE`입니다.
+
+## Collection layer
+
+Market Data and External Intelligence are collected independently. They are never mixed in one collector.
+
+- Market Data: OHLCV, Current Price, Volume, Index, FX, Rates, Commodity, Volatility, Liquidity
+- External Intelligence: corporate disclosure, domestic/foreign news, central bank, government policy, economic indicators, geopolitics, industry events, corporate events
+- Corporate actions are fixture-only (no live feed)
+
+Every collected record carries `eventOccurredAt`, `publishedAt`, `sourceReceivedAt`, `collectedAt`, `normalizedAt`, `analyzedAt`, `tradableAt`. Replay/backtest may use a record only when `tradableAt` and `sourceReceivedAt` are ≤ `as_of`.
+
+Collectors return an explicit `CollectionStatus`. `NO_EVENT` (successful empty feed) is not `DATA_UNAVAILABLE` (API/feed failure). Empty arrays are never implied success.
+
+Freshness classes: `ULTRA_FAST`, `INTRADAY`, `DAILY`, `LONG_HORIZON`.
+

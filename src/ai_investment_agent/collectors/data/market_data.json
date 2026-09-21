@@ -1,0 +1,208 @@
+{
+  "records": [
+    {
+      "recordId": "md_price_005930_current",
+      "kind": "CURRENT_PRICE",
+      "instrument": "005930",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:59:30+00:00",
+        "publishedAt": "2026-09-21T08:59:30+00:00",
+        "sourceReceivedAt": "2026-09-21T08:59:31+00:00",
+        "collectedAt": "2026-09-21T08:59:32+00:00",
+        "normalizedAt": "2026-09-21T08:59:32+00:00",
+        "analyzedAt": "2026-09-21T08:59:33+00:00",
+        "tradableAt": "2026-09-21T08:59:31+00:00"
+      },
+      "freshnessClass": "ULTRA_FAST",
+      "value": "71000",
+      "currency": "KRW",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_price_005930_past",
+      "kind": "CURRENT_PRICE",
+      "instrument": "005930",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-19T08:59:30+00:00",
+        "publishedAt": "2026-09-19T08:59:30+00:00",
+        "sourceReceivedAt": "2026-09-19T08:59:31+00:00",
+        "collectedAt": "2026-09-19T08:59:32+00:00",
+        "normalizedAt": "2026-09-19T08:59:32+00:00",
+        "analyzedAt": "2026-09-19T08:59:33+00:00",
+        "tradableAt": "2026-09-19T08:59:31+00:00"
+      },
+      "freshnessClass": "ULTRA_FAST",
+      "value": "69800",
+      "currency": "KRW",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_price_005930_future",
+      "kind": "CURRENT_PRICE",
+      "instrument": "005930",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-22T09:00:00+00:00",
+        "publishedAt": "2026-09-22T09:00:00+00:00",
+        "sourceReceivedAt": "2026-09-22T09:00:01+00:00",
+        "collectedAt": "2026-09-22T09:00:02+00:00",
+        "normalizedAt": "2026-09-22T09:00:02+00:00",
+        "analyzedAt": "2026-09-22T09:00:03+00:00",
+        "tradableAt": "2026-09-22T09:00:01+00:00"
+      },
+      "freshnessClass": "ULTRA_FAST",
+      "value": "72500",
+      "currency": "KRW",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_ohlcv_005930",
+      "kind": "OHLCV",
+      "instrument": "005930",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:00:00+00:00",
+        "publishedAt": "2026-09-21T08:00:00+00:00",
+        "sourceReceivedAt": "2026-09-21T08:00:05+00:00",
+        "collectedAt": "2026-09-21T08:00:06+00:00",
+        "normalizedAt": "2026-09-21T08:00:06+00:00",
+        "analyzedAt": "2026-09-21T08:00:07+00:00",
+        "tradableAt": "2026-09-21T08:00:05+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "ohlcv": {
+        "open": "70500",
+        "high": "71500",
+        "low": "70100",
+        "close": "71000",
+        "volume": "12000000",
+        "barStart": "2026-09-21T00:00:00+00:00",
+        "barEnd": "2026-09-21T08:00:00+00:00"
+      },
+      "currency": "KRW",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_volume_005930",
+      "kind": "VOLUME",
+      "instrument": "005930",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:59:30+00:00",
+        "publishedAt": "2026-09-21T08:59:30+00:00",
+        "sourceReceivedAt": "2026-09-21T08:59:31+00:00",
+        "collectedAt": "2026-09-21T08:59:32+00:00",
+        "normalizedAt": "2026-09-21T08:59:32+00:00",
+        "analyzedAt": "2026-09-21T08:59:33+00:00",
+        "tradableAt": "2026-09-21T08:59:31+00:00"
+      },
+      "freshnessClass": "ULTRA_FAST",
+      "value": "12000000",
+      "unit": "shares",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_index_kospi",
+      "kind": "INDEX",
+      "instrument": "KOSPI",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:59:30+00:00",
+        "publishedAt": "2026-09-21T08:59:30+00:00",
+        "sourceReceivedAt": "2026-09-21T08:59:31+00:00",
+        "collectedAt": "2026-09-21T08:59:32+00:00",
+        "normalizedAt": "2026-09-21T08:59:32+00:00",
+        "analyzedAt": "2026-09-21T08:59:33+00:00",
+        "tradableAt": "2026-09-21T08:59:31+00:00"
+      },
+      "freshnessClass": "ULTRA_FAST",
+      "value": "2650.12",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_fx_usdkrw",
+      "kind": "FX",
+      "instrument": "USDKRW",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:30:00+00:00",
+        "publishedAt": "2026-09-21T08:30:00+00:00",
+        "sourceReceivedAt": "2026-09-21T08:30:01+00:00",
+        "collectedAt": "2026-09-21T08:30:02+00:00",
+        "normalizedAt": "2026-09-21T08:30:02+00:00",
+        "analyzedAt": "2026-09-21T08:30:03+00:00",
+        "tradableAt": "2026-09-21T08:30:01+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "value": "1342.5",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_rates_ktb3y",
+      "kind": "RATES",
+      "instrument": "KTB3Y",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T00:00:00+00:00",
+        "publishedAt": "2026-09-21T00:00:00+00:00",
+        "sourceReceivedAt": "2026-09-21T00:05:00+00:00",
+        "collectedAt": "2026-09-21T00:05:01+00:00",
+        "normalizedAt": "2026-09-21T00:05:01+00:00",
+        "analyzedAt": "2026-09-21T00:05:02+00:00",
+        "tradableAt": "2026-09-21T00:05:00+00:00"
+      },
+      "freshnessClass": "DAILY",
+      "value": "0.0312",
+      "unit": "yield",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_commodity_gold",
+      "kind": "COMMODITY",
+      "instrument": "GOLD",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:00:00+00:00",
+        "publishedAt": "2026-09-21T08:00:00+00:00",
+        "sourceReceivedAt": "2026-09-21T08:00:01+00:00",
+        "collectedAt": "2026-09-21T08:00:02+00:00",
+        "normalizedAt": "2026-09-21T08:00:02+00:00",
+        "analyzedAt": "2026-09-21T08:00:03+00:00",
+        "tradableAt": "2026-09-21T08:00:01+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "value": "2680.4",
+      "currency": "USD",
+      "unit": "oz",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_vol_vkospi",
+      "kind": "VOLATILITY",
+      "instrument": "VKOSPI",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:00:00+00:00",
+        "publishedAt": "2026-09-21T08:00:00+00:00",
+        "sourceReceivedAt": "2026-09-21T08:00:01+00:00",
+        "collectedAt": "2026-09-21T08:00:02+00:00",
+        "normalizedAt": "2026-09-21T08:00:02+00:00",
+        "analyzedAt": "2026-09-21T08:00:03+00:00",
+        "tradableAt": "2026-09-21T08:00:01+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "value": "16.8",
+      "source": "fixture-market"
+    },
+    {
+      "recordId": "md_liq_005930",
+      "kind": "LIQUIDITY",
+      "instrument": "005930",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T08:00:00+00:00",
+        "publishedAt": "2026-09-21T08:00:00+00:00",
+        "sourceReceivedAt": "2026-09-21T08:00:01+00:00",
+        "collectedAt": "2026-09-21T08:00:02+00:00",
+        "normalizedAt": "2026-09-21T08:00:02+00:00",
+        "analyzedAt": "2026-09-21T08:00:03+00:00",
+        "tradableAt": "2026-09-21T08:00:01+00:00"
+      },
+      "freshnessClass": "INTRADAY",
+      "value": "0.8",
+      "unit": "score",
+      "source": "fixture-market"
+    }
+  ]
+}

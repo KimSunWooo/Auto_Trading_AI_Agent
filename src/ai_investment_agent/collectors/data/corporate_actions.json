@@ -1,0 +1,224 @@
+{
+  "actions": [
+    {
+      "actionId": "ca_dividend_005930",
+      "ticker": "005930",
+      "actionType": "DIVIDEND",
+      "timestamps": {
+        "eventOccurredAt": "2026-03-01T00:00:00+00:00",
+        "publishedAt": "2026-03-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-03-01T00:00:10+00:00",
+        "collectedAt": "2026-03-01T00:00:11+00:00",
+        "normalizedAt": "2026-03-01T00:00:12+00:00",
+        "analyzedAt": "2026-03-01T00:00:20+00:00",
+        "tradableAt": "2026-03-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "exDate": "2026-03-30",
+      "effectiveDate": "2026-04-20",
+      "cashAmount": "361",
+      "currency": "KRW",
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_exdiv_005930",
+      "ticker": "005930",
+      "actionType": "EX_DIVIDEND",
+      "timestamps": {
+        "eventOccurredAt": "2026-03-30T00:00:00+00:00",
+        "publishedAt": "2026-03-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-03-01T00:00:10+00:00",
+        "collectedAt": "2026-03-01T00:00:11+00:00",
+        "normalizedAt": "2026-03-01T00:00:12+00:00",
+        "analyzedAt": "2026-03-01T00:00:20+00:00",
+        "tradableAt": "2026-03-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "exDate": "2026-03-30",
+      "currency": "KRW",
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_split_005930",
+      "ticker": "005930",
+      "actionType": "SPLIT",
+      "timestamps": {
+        "eventOccurredAt": "2018-05-16T00:00:00+00:00",
+        "publishedAt": "2018-04-30T00:00:00+00:00",
+        "sourceReceivedAt": "2018-04-30T00:00:10+00:00",
+        "collectedAt": "2018-04-30T00:00:11+00:00",
+        "normalizedAt": "2018-04-30T00:00:12+00:00",
+        "analyzedAt": "2018-04-30T00:00:20+00:00",
+        "tradableAt": "2018-04-30T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "effectiveDate": "2018-05-16",
+      "ratio": "50",
+      "details": {"fromShares": "1", "toShares": "50"},
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_reverse_split_999990",
+      "ticker": "999990",
+      "actionType": "REVERSE_SPLIT",
+      "timestamps": {
+        "eventOccurredAt": "2026-06-01T00:00:00+00:00",
+        "publishedAt": "2026-05-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-05-01T00:00:10+00:00",
+        "collectedAt": "2026-05-01T00:00:11+00:00",
+        "normalizedAt": "2026-05-01T00:00:12+00:00",
+        "analyzedAt": "2026-05-01T00:00:20+00:00",
+        "tradableAt": "2026-05-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "effectiveDate": "2026-06-01",
+      "ratio": "0.2",
+      "details": {"fromShares": "5", "toShares": "1"},
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_merge_999991",
+      "ticker": "999991",
+      "actionType": "MERGE",
+      "timestamps": {
+        "eventOccurredAt": "2026-07-01T00:00:00+00:00",
+        "publishedAt": "2026-06-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-06-01T00:00:10+00:00",
+        "collectedAt": "2026-06-01T00:00:11+00:00",
+        "normalizedAt": "2026-06-01T00:00:12+00:00",
+        "analyzedAt": "2026-06-01T00:00:20+00:00",
+        "tradableAt": "2026-06-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "effectiveDate": "2026-07-01",
+      "ratio": "0.5",
+      "details": {"note": "share consolidation / reverse-split merge"},
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_rights_005930",
+      "ticker": "005930",
+      "actionType": "RIGHTS_ISSUE",
+      "timestamps": {
+        "eventOccurredAt": "2026-08-01T00:00:00+00:00",
+        "publishedAt": "2026-07-15T00:00:00+00:00",
+        "sourceReceivedAt": "2026-07-15T00:00:10+00:00",
+        "collectedAt": "2026-07-15T00:00:11+00:00",
+        "normalizedAt": "2026-07-15T00:00:12+00:00",
+        "analyzedAt": "2026-07-15T00:00:20+00:00",
+        "tradableAt": "2026-07-15T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "exDate": "2026-08-10",
+      "effectiveDate": "2026-08-01",
+      "ratio": "0.1",
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_bonus_005930",
+      "ticker": "005930",
+      "actionType": "BONUS_ISSUE",
+      "timestamps": {
+        "eventOccurredAt": "2026-08-20T00:00:00+00:00",
+        "publishedAt": "2026-08-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-08-01T00:00:10+00:00",
+        "collectedAt": "2026-08-01T00:00:11+00:00",
+        "normalizedAt": "2026-08-01T00:00:12+00:00",
+        "analyzedAt": "2026-08-01T00:00:20+00:00",
+        "tradableAt": "2026-08-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "effectiveDate": "2026-08-20",
+      "ratio": "0.05",
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_rights_off_005930",
+      "ticker": "005930",
+      "actionType": "RIGHTS_OFF",
+      "timestamps": {
+        "eventOccurredAt": "2026-08-10T00:00:00+00:00",
+        "publishedAt": "2026-07-15T00:00:00+00:00",
+        "sourceReceivedAt": "2026-07-15T00:00:10+00:00",
+        "collectedAt": "2026-07-15T00:00:11+00:00",
+        "normalizedAt": "2026-07-15T00:00:12+00:00",
+        "analyzedAt": "2026-07-15T00:00:20+00:00",
+        "tradableAt": "2026-07-15T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "exDate": "2026-08-10",
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_halt_999992",
+      "ticker": "999992",
+      "actionType": "TRADING_HALT",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-21T01:00:00+00:00",
+        "publishedAt": "2026-09-21T01:00:00+00:00",
+        "sourceReceivedAt": "2026-09-21T01:00:05+00:00",
+        "collectedAt": "2026-09-21T01:00:06+00:00",
+        "normalizedAt": "2026-09-21T01:00:07+00:00",
+        "analyzedAt": "2026-09-21T01:00:08+00:00",
+        "tradableAt": "2026-09-21T01:00:05+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "details": {"reason": "fixture halt"},
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_delist_999993",
+      "ticker": "999993",
+      "actionType": "DELISTING",
+      "timestamps": {
+        "eventOccurredAt": "2026-12-01T00:00:00+00:00",
+        "publishedAt": "2026-09-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-09-01T00:00:10+00:00",
+        "collectedAt": "2026-09-01T00:00:11+00:00",
+        "normalizedAt": "2026-09-01T00:00:12+00:00",
+        "analyzedAt": "2026-09-01T00:00:20+00:00",
+        "tradableAt": "2026-09-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "effectiveDate": "2026-12-01",
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_merger_999994",
+      "ticker": "999994",
+      "actionType": "MERGER",
+      "timestamps": {
+        "eventOccurredAt": "2026-11-01T00:00:00+00:00",
+        "publishedAt": "2026-08-01T00:00:00+00:00",
+        "sourceReceivedAt": "2026-08-01T00:00:10+00:00",
+        "collectedAt": "2026-08-01T00:00:11+00:00",
+        "normalizedAt": "2026-08-01T00:00:12+00:00",
+        "analyzedAt": "2026-08-01T00:00:20+00:00",
+        "tradableAt": "2026-08-01T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "effectiveDate": "2026-11-01",
+      "newTicker": "999995",
+      "details": {"acquirer": "999995"},
+      "source": "fixture-corporate-action"
+    },
+    {
+      "actionId": "ca_ticker_change_999996",
+      "ticker": "999996",
+      "actionType": "TICKER_CHANGE",
+      "timestamps": {
+        "eventOccurredAt": "2026-09-01T00:00:00+00:00",
+        "publishedAt": "2026-08-15T00:00:00+00:00",
+        "sourceReceivedAt": "2026-08-15T00:00:10+00:00",
+        "collectedAt": "2026-08-15T00:00:11+00:00",
+        "normalizedAt": "2026-08-15T00:00:12+00:00",
+        "analyzedAt": "2026-08-15T00:00:20+00:00",
+        "tradableAt": "2026-08-15T00:00:10+00:00"
+      },
+      "freshnessClass": "LONG_HORIZON",
+      "effectiveDate": "2026-09-01",
+      "newTicker": "999997",
+      "source": "fixture-corporate-action"
+    }
+  ]
+}
