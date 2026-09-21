@@ -9,6 +9,7 @@ from ai_investment_agent.domain.versions import (
     FEATURE_VERSION,
     MODEL_VERSION,
     POLICY_VERSION,
+    PROMPT_VERSION,
 )
 
 __version__ = MODEL_VERSION
@@ -17,5 +18,6 @@ __all__ = [
     "FEATURE_VERSION",
     "MODEL_VERSION",
     "POLICY_VERSION",
+    "PROMPT_VERSION",
     "__version__",
 ]

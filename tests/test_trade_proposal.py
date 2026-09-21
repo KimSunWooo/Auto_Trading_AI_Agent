@@ -18,7 +18,8 @@ def test_trade_proposal_generation_for_known_market():
     assert proposal.horizon is Horizon.LONG_TERM
     assert proposal.decision is DecisionType.LONG_TERM_BUY
     assert 0 < proposal.raw_confidence <= 1
-    assert 0 < proposal.calibrated_confidence <= 1
+    assert proposal.calibrated_confidence is None
+    assert proposal.prompt_version
     assert proposal.suggested_capital_pct == Decimal("5")
     assert proposal.suggested_capital_pct <= Decimal("100")
     assert proposal.expected_holding_period == 252

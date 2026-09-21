@@ -8,11 +8,20 @@ from decimal import Decimal
 from ai_investment_agent.capital.policy import CapitalPolicy
 from ai_investment_agent.decision.engine import DecisionEngine, DecisionInput
 from ai_investment_agent.domain.capital import CapitalContext
+from ai_investment_agent.domain.confidence import CalibrationTable
+from ai_investment_agent.domain.context import MarketContext
 from ai_investment_agent.domain.decision import DecisionSnapshot
-from ai_investment_agent.domain.enums import DecisionType, JournalStage, KillSwitchLevel, PolicyState
+from ai_investment_agent.domain.enums import (
+    DecisionType,
+    HorizonChoice,
+    JournalStage,
+    KillSwitchLevel,
+    PolicyState,
+)
 from ai_investment_agent.domain.ids import new_decision_id
 from ai_investment_agent.domain.policy import HumanOverride, PortfolioContext, RiskBudgets
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
+from ai_investment_agent.domain.versions import PROMPT_VERSION
 from ai_investment_agent.intelligence.regime import RegimeAssessor
 from ai_investment_agent.journal.service import JournalService
 from ai_investment_agent.policy.priorities import PRIORITY_ORDER
@@ -33,6 +42,7 @@ class JudgmentRequest:
     risk_budgets: RiskBudgets | None = None
     policy_state: PolicyState = PolicyState.NORMAL
     kill_switch_level: KillSwitchLevel = KillSwitchLevel.LEVEL_0_NORMAL
+    feature_snapshot: MarketContext | None = None
 
 
 class JudgmentAgent:
@@ -49,6 +59,7 @@ class JudgmentAgent:
         repository: DecisionRepository,
         publisher: DecisionPublisher,
         now_fn: Callable[[], datetime] | None = None,
+        calibration: CalibrationTable | None = None,
     ) -> None:
         self._market_data = market_data
         self._events = events
@@ -57,7 +68,7 @@ class JudgmentAgent:
         self._publisher = publisher
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._capital_policy = CapitalPolicy()
-        self._engine = DecisionEngine(self._capital_policy)
+        self._engine = DecisionEngine(self._capital_policy, calibration)
         self._safety = SafetyPolicyLayer()
         self._regime = RegimeAssessor()
         self._journal = JournalService(repository, self._now)
@@ -159,6 +170,9 @@ class JudgmentAgent:
             proposal=proposal,
             priorities_applied=list(PRIORITY_ORDER),
             created_at=now,
+            selected_horizon=_selected_horizon(proposal),
+            feature_snapshot=request.feature_snapshot,
+            prompt_version=PROMPT_VERSION,
         )
         self._repository.save_snapshot(record)
         self._publisher.publish(proposal)
@@ -190,3 +204,13 @@ def _parse_llm(
         for item in content.get("invalidationConditions", [])
     ]
     return thesis, desired, raw_confidence, desired_pct, conditions
+
+
+def _selected_horizon(proposal) -> HorizonChoice | None:
+    mapping = {
+        DecisionType.LONG_TERM_BUY: HorizonChoice.LONG_TERM,
+        DecisionType.SHORT_TERM_BUY: HorizonChoice.SHORT_TERM,
+        DecisionType.TACTICAL_WAIT: HorizonChoice.TACTICAL_WAIT,
+        DecisionType.NO_TRADE: HorizonChoice.NO_TRADE,
+    }
+    return mapping.get(proposal.decision)

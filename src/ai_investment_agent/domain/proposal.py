@@ -11,7 +11,12 @@ from ai_investment_agent.domain.errors import InvalidDecisionError
 from ai_investment_agent.domain.market import MarketRegime
 from ai_investment_agent.domain.policy import PolicyResult
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
-from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION
+from ai_investment_agent.domain.versions import (
+    FEATURE_VERSION,
+    MODEL_VERSION,
+    POLICY_VERSION,
+    PROMPT_VERSION,
+)
 
 
 class TradeProposal(DomainModel):
@@ -27,7 +32,7 @@ class TradeProposal(DomainModel):
     horizon: Horizon
     action: Action
     raw_confidence: float = Field(ge=0, le=1)
-    calibrated_confidence: float = Field(ge=0, le=1)
+    calibrated_confidence: float | None = Field(default=None, ge=0, le=1)
     expected_return: Decimal
     estimated_risk: Decimal = Field(ge=0)
     suggested_capital_pct: Decimal = Field(ge=0, le=100)
@@ -41,6 +46,7 @@ class TradeProposal(DomainModel):
     reason_codes: list[str] = Field(default_factory=list)
     market_regime: MarketRegime
     model_version: str = MODEL_VERSION
+    prompt_version: str = PROMPT_VERSION
     feature_version: str = FEATURE_VERSION
     policy_version: str = POLICY_VERSION
     generated_at: datetime

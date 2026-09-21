@@ -53,10 +53,10 @@ src/ai_investment_agent/
   decision/      # 순수 DecisionEngine
   capital/       # CapitalContext 해석. 누락 시 0, 무한 자금 아님
   policy/        # 하드 게이트 + SafetyPolicyLayer (Proposal만 제한)
-  journal/       # Decision journal
-  evaluation/    # 이후 단계
-  replay/        # as-of 접근성 필터 (look-ahead 방지)
-  health/        # 판단 전용 모드 상태
+  journal/       # Decision journal (모든 action 저장)
+  evaluation/    # Offline quality / health / promotion path
+  replay/        # replay(decisionId) + as-of 접근성 필터
+  health/        # process health + modelHealth (UNKNOWN ≠ HEALTHY)
   api/           # HTTP는 이번 단계 미구현
 ```
 
@@ -77,7 +77,7 @@ domain → 표준 라이브러리 + pydantic  (adapter/SDK 금지)
 - `MarketDataRecord` / `IntelligenceRecord` / `CorporateAction` (수집 계층)
 - `CapitalContext` (AI 한도 뷰. 전체 계좌 제어 아님)
 - `InvestmentThesis`, `TradeProposal`
-- `DecisionSnapshot`, `DecisionJournalEntry`
+- `DecisionSnapshot`, `DecisionRecord`, `DecisionJournalEntry`
 
 지원 Decision:
 
@@ -192,4 +192,36 @@ Horizon Selector 반환값: `LONG_TERM` / `SHORT_TERM` / `TACTICAL_WAIT` / `NO_T
 Net Edge = Expected Return − Risk Penalty − Transaction Cost − Slippage − Drawdown Penalty − Tail Risk − Uncertainty Penalty. 부족하면 `NO_TRADE`.
 
 BUY/HOLD thesis에는 `drivers`와 `invalidations`를 남깁니다. `EntryAnalyzer`와 `PositionThesisMonitor`는 분리되어 있고, Position은 fixture만 사용합니다. 결과는 여전히 TradeProposal까지입니다.
+
+## Decision Journal / Evaluation / Replay
+
+모든 판단을 저장합니다. BUY만이 아니라 `SELL` · `HOLD` · `TACTICAL_WAIT` · `NO_TRADE` · `EXIT_REVIEW`도 동일하게 journal에 남습니다.
+
+`DecisionRecord` 최소 필드: decisionId, timestamp, ticker, marketSnapshot, eventSnapshot, featureSnapshot, marketRegime, longAnalysis, shortAnalysis, selectedHorizon, action, rawConfidence, calibratedConfidence, expectedReturn, estimatedRisk, suggestedCapitalPct, reasonCodes, thesis, invalidationConditions, modelVersion, promptVersion, featureVersion, policyVersion.
+
+Confidence: LLM `rawConfidence`는 확률이 아닙니다. `calibratedConfidence`는 오프라인 calibration table이 있을 때만 채웁니다. 데이터가 없으면 `null`이며 값을 지어내지 않습니다.
+
+Counterfactual: 실제 주문이 없어도 나중에 `return1h` / `return1d` / `return5d` / `return20d` / MFE / MAE를 붙일 수 있습니다.
+
+`ReplayService.replay(decisionId)`는 당시 snapshot과 version pin을 복원합니다. Live LLM/시세 호출을 다시 돌리지는 않습니다.
+
+성능 축은 분리되어 있습니다.
+
+- Alpha Quality
+- Horizon Selection Quality
+- Risk Assessment Quality
+- Capital Allocation Quality
+
+Execution Quality는 주문 시스템 결합 이후에 별도로 평가할 예정이며 현재는 구현하지 않습니다.
+
+Model Health metric interface: Win Rate, Expected Value, Drawdown, Sharpe, Calibration Error, Decision Distribution, Trade/Proposal Frequency, Average Confidence.
+
+상태: `HEALTHY` · `DEGRADED` · `UNHEALTHY` · `UNKNOWN`. `UNKNOWN`은 `HEALTHY`로 취급하지 않습니다.
+
+온라인 자기학습은 금지입니다. 손실이 나면 바로 다음 판단의 전략을 바꾸지 않습니다.
+
+```
+Decision Logs → Offline Evaluation → Candidate Model → Backtest → Shadow → 승인 → New Version
+```
+
 

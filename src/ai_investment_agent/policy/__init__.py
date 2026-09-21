@@ -1,5 +1,6 @@
 """Policy package. Hard gates live here so adapters cannot bypass them easily."""
 
+from ai_investment_agent.policy.calibration import resolve_calibrated
 from ai_investment_agent.policy.utility import UtilityConfig
 from ai_investment_agent.policy.feature_config import EventImpactWeights, FeaturePolicyConfig
 from ai_investment_agent.policy.gates import GateResult, apply_hard_gates
@@ -17,6 +18,7 @@ __all__ = [
     "PRIORITY_ORDER",
     "SafetyPolicyLayer",
     "apply_hard_gates",
+    "resolve_calibrated",
     "source_tier_for",
     "source_trust_score",
     "UtilityConfig",

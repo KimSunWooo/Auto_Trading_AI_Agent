@@ -94,6 +94,42 @@ class JournalStage(str, Enum):
     TRADE_PROPOSAL = "TRADE_PROPOSAL"
 
 
+class ModelHealthStatus(str, Enum):
+    """UNKNOWN is never coerced to HEALTHY."""
+
+    HEALTHY = "HEALTHY"
+    DEGRADED = "DEGRADED"
+    UNHEALTHY = "UNHEALTHY"
+    UNKNOWN = "UNKNOWN"
+
+
+class QualityAxis(str, Enum):
+    """Judgment quality axes. Execution Quality is reserved and not scored here."""
+
+    ALPHA_QUALITY = "ALPHA_QUALITY"
+    HORIZON_SELECTION_QUALITY = "HORIZON_SELECTION_QUALITY"
+    RISK_ASSESSMENT_QUALITY = "RISK_ASSESSMENT_QUALITY"
+    CAPITAL_ALLOCATION_QUALITY = "CAPITAL_ALLOCATION_QUALITY"
+
+
+class EvaluationStatus(str, Enum):
+    PENDING = "PENDING"
+    INSUFFICIENT_SAMPLE = "INSUFFICIENT_SAMPLE"
+    SCORED = "SCORED"
+
+
+class ModelLifecycleStage(str, Enum):
+    """Offline promotion path. Live losses must not mutate the running model."""
+
+    DECISION_LOGS = "DECISION_LOGS"
+    OFFLINE_EVALUATION = "OFFLINE_EVALUATION"
+    CANDIDATE_MODEL = "CANDIDATE_MODEL"
+    BACKTEST = "BACKTEST"
+    SHADOW = "SHADOW"
+    APPROVED = "APPROVED"
+    NEW_VERSION = "NEW_VERSION"
+
+
 class PolicyState(str, Enum):
     """AI-side operating state. Not a broker halt flag."""
 

@@ -19,6 +19,8 @@ from ai_investment_agent.domain.agent_views import (
     ShortTermFeatures,
 )
 from ai_investment_agent.domain.capital import CapitalContext
+from ai_investment_agent.domain.confidence import CalibrationTable
+from ai_investment_agent.domain.context import MarketContext
 from ai_investment_agent.domain.decision import DecisionSnapshot
 from ai_investment_agent.domain.enums import (
     DecisionType,
@@ -35,6 +37,7 @@ from ai_investment_agent.domain.ids import new_decision_id
 from ai_investment_agent.domain.market import MarketRegime, MarketSnapshot
 from ai_investment_agent.domain.policy import HumanOverride, PortfolioContext, RiskBudgets
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
+from ai_investment_agent.domain.versions import PROMPT_VERSION
 from ai_investment_agent.horizon.selector import HorizonSelector
 from ai_investment_agent.journal.service import JournalService
 from ai_investment_agent.policy.priorities import PRIORITY_ORDER
@@ -59,6 +62,7 @@ class InvestmentJudgmentRequest:
     risk_budgets: RiskBudgets | None = None
     policy_state: PolicyState = PolicyState.NORMAL
     kill_switch_level: KillSwitchLevel = KillSwitchLevel.LEVEL_0_NORMAL
+    feature_snapshot: MarketContext | None = None
 
 
 class InvestmentJudgmentAgent:
@@ -70,6 +74,7 @@ class InvestmentJudgmentAgent:
         publisher: DecisionPublisher,
         config: UtilityConfig | None = None,
         now_fn: Callable[[], datetime] | None = None,
+        calibration: CalibrationTable | None = None,
     ) -> None:
         self._config = config or UtilityConfig()
         self._long = LongTermAgent(self._config)
@@ -78,7 +83,7 @@ class InvestmentJudgmentAgent:
         self._entry = EntryAnalyzer(self._config)
         self._positions = PositionThesisMonitor()
         self._capital = CapitalPolicy()
-        self._engine = DecisionEngine(self._capital)
+        self._engine = DecisionEngine(self._capital, calibration)
         self._safety = SafetyPolicyLayer()
         self._repository = repository
         self._publisher = publisher
@@ -168,6 +173,11 @@ class InvestmentJudgmentAgent:
             priorities_applied=list(PRIORITY_ORDER),
             created_at=now,
             horizon_decision=selected,
+            long_analysis=long_view,
+            short_analysis=short_view,
+            selected_horizon=selected.choice,
+            feature_snapshot=request.feature_snapshot,
+            prompt_version=PROMPT_VERSION,
         )
         self._repository.save_snapshot(record)
         self._publisher.publish(proposal)

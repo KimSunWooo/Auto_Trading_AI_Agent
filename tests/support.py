@@ -13,6 +13,7 @@ from ai_investment_agent.adapters.in_memory import (
     InMemoryDecisionRepository,
 )
 from ai_investment_agent.agents.judgment_agent import JudgmentAgent
+from ai_investment_agent.domain.confidence import CalibrationTable
 from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.enums import DecisionType
 
@@ -36,6 +37,7 @@ def make_agent(
     market_file: str,
     desired: DecisionType = DecisionType.LONG_TERM_BUY,
     event_provider: FixtureEventProvider | None = None,
+    calibration: CalibrationTable | None = None,
 ) -> tuple[JudgmentAgent, InMemoryDecisionRepository, InMemoryDecisionPublisher]:
     market = FixtureMarketDataProvider.from_files(market_file)
     events = event_provider or FixtureEventProvider.from_file("events.json")
@@ -49,5 +51,6 @@ def make_agent(
         repository=repository,
         publisher=publisher,
         now_fn=lambda: FIXED_NOW,
+        calibration=calibration,
     )
     return agent, repository, publisher

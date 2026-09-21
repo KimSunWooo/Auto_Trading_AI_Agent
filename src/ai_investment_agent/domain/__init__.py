@@ -41,6 +41,7 @@ from ai_investment_agent.domain.enums import (
     ContextSignal,
     CorporateActionType,
     DecisionType,
+    EvaluationStatus,
     EventCategory,
     EventDirection,
     EventSeverity,
@@ -52,12 +53,25 @@ from ai_investment_agent.domain.enums import (
     JournalStage,
     MarketDataKind,
     MarketRegimeType,
+    ModelHealthStatus,
+    ModelLifecycleStage,
+    QualityAxis,
     RawPutResult,
     ReasonCode,
     SourceTier,
     Stance,
     VerificationStatus,
 )
+from ai_investment_agent.domain.confidence import CalibrationTable, ConfidenceAssessment
+from ai_investment_agent.domain.evaluation import (
+    CounterfactualOutcome,
+    ModelHealthMetrics,
+    ModelLifecyclePlan,
+    OfflineEvaluationReport,
+    QualityScore,
+    VersionPin,
+)
+from ai_investment_agent.domain.journal import DecisionJournalEntry, DecisionRecord
 from ai_investment_agent.domain.event_intelligence import (
     AnalyzedMarketEvent,
     EventCluster,
@@ -65,28 +79,31 @@ from ai_investment_agent.domain.event_intelligence import (
     RawEvent,
 )
 from ai_investment_agent.domain.external_intelligence import IntelligenceRecord
-from ai_investment_agent.domain.journal import DecisionJournalEntry
 from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketSnapshot
 from ai_investment_agent.domain.market_feed import MarketDataRecord, OhlcvBar
 from ai_investment_agent.domain.proposal import TradeProposal
 from ai_investment_agent.domain.raw import RawRecord
 from ai_investment_agent.domain.serialization import from_json, to_json
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
-from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION
+from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION, PROMPT_VERSION
 
 __all__ = [
     "Action",
     "AgentPriority",
     "AgentAssessment",
     "AnalyzedMarketEvent",
+    "CalibrationTable",
     "CapitalContext",
     "CollectionResult",
     "CollectionStatus",
     "CollectionTimestamps",
+    "ConfidenceAssessment",
     "ContextSignal",
     "CorporateAction",
     "CorporateActionType",
+    "CounterfactualOutcome",
     "DecisionJournalEntry",
+    "DecisionRecord",
     "DecisionSnapshot",
     "DecisionType",
     "EntrySnapshot",
@@ -95,6 +112,7 @@ __all__ = [
     "EventDirection",
     "EventSeverity",
     "EventImpactFeatures",
+    "EvaluationStatus",
     "ExtractedEntities",
     "FixturePosition",
     "FixturePositionSlice",
@@ -121,12 +139,20 @@ __all__ = [
     "MarketRegime",
     "MarketRegimeType",
     "MarketSnapshot",
+    "ModelHealthMetrics",
+    "ModelHealthStatus",
+    "ModelLifecyclePlan",
+    "ModelLifecycleStage",
     "OhlcvBar",
+    "OfflineEvaluationReport",
     "POLICY_VERSION",
+    "PROMPT_VERSION",
     "PolicyAction",
     "PolicyResult",
     "PolicyState",
     "PortfolioContext",
+    "QualityAxis",
+    "QualityScore",
     "QuantitativeFeatures",
     "RawEvent",
     "RawPutResult",
@@ -138,6 +164,7 @@ __all__ = [
     "ShortTermFeatures",
     "Stance",
     "TradeProposal",
+    "VersionPin",
     "from_json",
     "is_accessible_at",
     "is_stale",

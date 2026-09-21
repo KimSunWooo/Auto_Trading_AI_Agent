@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from ai_investment_agent.capital.policy import CapitalPolicy
+from ai_investment_agent.domain.confidence import CalibrationTable
 from ai_investment_agent.domain.capital import CapitalContext
 from ai_investment_agent.domain.enums import Action, DecisionType, Horizon, ReasonCode
 from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketSnapshot
@@ -13,8 +14,9 @@ from ai_investment_agent.domain.proposal import (
     action_horizon_for,
 )
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
-from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION
+from ai_investment_agent.domain.versions import FEATURE_VERSION, MODEL_VERSION, POLICY_VERSION, PROMPT_VERSION
 from ai_investment_agent.horizon.mapping import holding_period_days
+from ai_investment_agent.policy.calibration import resolve_calibrated
 from ai_investment_agent.policy.gates import apply_hard_gates
 from ai_investment_agent.policy.priorities import PRIORITY_ORDER
 
@@ -44,8 +46,13 @@ class DecisionOutput:
 class DecisionEngine:
     """Pure judgment. No I/O, no broker, no order objects."""
 
-    def __init__(self, capital_policy: CapitalPolicy | None = None) -> None:
+    def __init__(
+        self,
+        capital_policy: CapitalPolicy | None = None,
+        calibration: CalibrationTable | None = None,
+    ) -> None:
         self._capital_policy = capital_policy or CapitalPolicy()
+        self._calibration = calibration
 
     def decide(self, payload: DecisionInput) -> DecisionOutput:
         gate = apply_hard_gates(
@@ -75,7 +82,7 @@ class DecisionEngine:
         if decision is DecisionType.NO_TRADE and ReasonCode.POLICY_NO_TRADE_IS_VALID.value not in reasons:
             reasons.append(ReasonCode.POLICY_NO_TRADE_IS_VALID.value)
 
-        calibrated = _calibrate(payload.raw_confidence, decision, gate.blocked)
+        calibrated = resolve_calibrated(payload.raw_confidence, self._calibration)
         expected_return, estimated_risk = _risk_return(decision, payload)
 
         proposal = TradeProposal(
@@ -94,6 +101,7 @@ class DecisionEngine:
             reason_codes=_unique(reasons),
             market_regime=payload.regime,
             model_version=MODEL_VERSION,
+            prompt_version=PROMPT_VERSION,
             feature_version=FEATURE_VERSION,
             policy_version=POLICY_VERSION,
             generated_at=payload.generated_at,
@@ -101,12 +109,6 @@ class DecisionEngine:
         # PRIORITY_ORDER is recorded by the agent on the snapshot, not on the proposal.
         _ = PRIORITY_ORDER
         return DecisionOutput(proposal=proposal, decision=decision, reason_codes=proposal.reason_codes)
-
-
-def _calibrate(raw: float, decision: DecisionType, blocked: bool) -> float:
-    if blocked or decision is DecisionType.NO_TRADE:
-        return min(0.99, max(raw, 0.85))
-    return min(raw, 0.8)
 
 
 def _risk_return(decision: DecisionType, payload: DecisionInput) -> tuple[Decimal, Decimal]:

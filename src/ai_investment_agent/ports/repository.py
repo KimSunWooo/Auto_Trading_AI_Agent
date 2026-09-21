@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from ai_investment_agent.domain.decision import DecisionSnapshot
+from ai_investment_agent.domain.evaluation import CounterfactualOutcome
 from ai_investment_agent.domain.journal import DecisionJournalEntry
 
 
@@ -14,8 +15,16 @@ class DecisionRepository(Protocol):
     def get_snapshot(self, decision_id: str) -> DecisionSnapshot | None:
         ...
 
+    def list_snapshots(self) -> Sequence[DecisionSnapshot]:
+        ...
+
     def save_journal_entry(self, entry: DecisionJournalEntry) -> None:
         ...
 
     def list_journal(self, decision_id: str) -> Sequence[DecisionJournalEntry]:
+        ...
+
+    def attach_counterfactual(
+        self, decision_id: str, outcome: CounterfactualOutcome
+    ) -> DecisionSnapshot | None:
         ...
