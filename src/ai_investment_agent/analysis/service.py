@@ -101,7 +101,7 @@ class AnalysisResult(DomainModel):
 
 
 class AnalysisService:
-    """Fixture-backed judgment service. Auto-Trading-system is not connected."""
+    """Judgment service. Auto-Trading-system is not connected. Stops at TradeProposal."""
 
     def __init__(
         self,
@@ -138,6 +138,31 @@ class AnalysisService:
         self.last_external: CollectionResult[IntelligenceRecord] | None = None
         self.last_readiness: DecisionReadiness | None = None
         self.last_pipeline_error: str | None = None
+        self.default_capital: CapitalContext | None = None
+        self.default_portfolio = None
+        self.default_risk_budgets = None
+        self.llm = None
+        self.provider_diagnostics: dict[str, object] = {}
+
+    def _capture_provider_diagnostics(
+        self,
+        news: CollectionResult,
+        disclosure: CollectionResult,
+        macro: CollectionResult,
+    ) -> None:
+        def diag(collector: object, fallback_status: CollectionStatus) -> object:
+            value = getattr(collector, "last_diagnostics", None)
+            if value is not None:
+                return value
+            return {"status": fallback_status.value}
+
+        self.provider_diagnostics = {
+            "market": getattr(self.market, "last_diagnostics", None),
+            "news": diag(self.news, news.status),
+            "disclosure": diag(self.disclosure, disclosure.status),
+            "macro": diag(self.macro, macro.status),
+            "llm": getattr(self.llm, "last_diagnostics", None) if self.llm is not None else None,
+        }
 
     def evaluate(
         self,
@@ -166,6 +191,7 @@ class AnalysisService:
         disclosure = self.disclosure.collect(ticker, as_of)
         macro = self.macro.collect(as_of)
         scheduled = self.scheduled.collect(as_of, ticker=ticker)
+        self._capture_provider_diagnostics(news, disclosure, macro)
         providers = {
             "news": news,
             "disclosure": disclosure,
@@ -207,7 +233,16 @@ class AnalysisService:
         raw_events = [intelligence_to_raw(item) for item in external_items]
         analyzed = self.intelligence.ingest_many(raw_events) if raw_events else []
         series = price_series_from(market.items)
-        snapshot = snapshot_from(ticker, as_of, market.items)
+        snapshot = snapshot_from(
+            ticker,
+            as_of,
+            market.items,
+            source=(
+                "live-market"
+                if self.runtime.data_mode is DataMode.LIVE_OBSERVATION
+                else "fixture-collector"
+            ),
+        )
         context = self.features.build(
             ticker=ticker,
             as_of=as_of,
@@ -216,7 +251,12 @@ class AnalysisService:
             liquidity=_liquidity(market.items),
         )
         judgment_events = [analyzed_to_market_event(item, ticker) for item in analyzed]
-        capital = capital_context if capital_context is not None else CapitalContext.missing_conservative()
+        if capital_context is not None:
+            capital = capital_context
+        elif self.default_capital is not None:
+            capital = self.default_capital
+        else:
+            capital = CapitalContext.missing_conservative()
         judged = self.agent.judge(
             InvestmentJudgmentRequest(
                 ticker=ticker,
@@ -230,6 +270,8 @@ class AnalysisService:
                 events=tuple(judgment_events),
                 data_mode=self.runtime.data_mode,
                 readiness=readiness,
+                portfolio_context=self.default_portfolio,
+                risk_budgets=self.default_risk_budgets,
             )
         )
         shadow_result = self.shadow.apply_snapshot(judged)
@@ -327,7 +369,13 @@ def price_series_from(records: list[MarketDataRecord]) -> PriceSeries:
     return PriceSeries(timestamps=timestamps, closes=closes, volumes=volumes)
 
 
-def snapshot_from(ticker: str, as_of: datetime, records: list[MarketDataRecord]) -> MarketSnapshot:
+def snapshot_from(
+    ticker: str,
+    as_of: datetime,
+    records: list[MarketDataRecord],
+    *,
+    source: str = "fixture-collector",
+) -> MarketSnapshot:
     last_price = _latest_value(records, MarketDataKind.CURRENT_PRICE)
     if last_price is None:
         ohlcv = [item.ohlcv for item in records if item.ohlcv is not None]
@@ -352,7 +400,7 @@ def snapshot_from(ticker: str, as_of: datetime, records: list[MarketDataRecord])
         volatility=volatility or Decimal("0.05"),
         liquidity_score=liquidity,
         data_completeness=completeness,
-        source="fixture-collector",
+        source=source,
     )
 
 

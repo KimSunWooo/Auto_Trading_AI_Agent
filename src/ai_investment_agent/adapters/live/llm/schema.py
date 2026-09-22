@@ -29,8 +29,6 @@ class StructuredLlmJudgment(DomainModel):
     event_classification: str | None = Field(default=None, alias="eventClassification")
     llm_status: Literal["OK"] = Field(default="OK", alias="llmStatus")
 
-    model_config = {"populate_by_name": True}
-
 
 def parse_structured_judgment(payload: dict[str, Any]) -> StructuredLlmJudgment:
     try:

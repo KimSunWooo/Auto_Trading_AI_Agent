@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any
 
 from ai_investment_agent.adapters.live.config import market_http_config
 from ai_investment_agent.adapters.live.diagnostics import ProviderDiagnostics

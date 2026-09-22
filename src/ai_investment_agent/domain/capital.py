@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 
 from ai_investment_agent.domain.base import DomainModel
 
-CapitalSource = Literal["provided", "missing_conservative_default"]
+CapitalSource = Literal["provided", "missing_conservative_default", "observation_config"]
 
 
 class CapitalContext(DomainModel):

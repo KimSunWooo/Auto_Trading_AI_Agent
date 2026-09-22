@@ -55,7 +55,7 @@ def dart_list_to_records(
 
     rows = payload.get("list") or []
     if not isinstance(rows, list):
-        raise ValueError("opendart list must be an array")
+        raise TypeError("opendart list must be an array")
 
     records: list[IntelligenceRecord] = []
     for row in rows:

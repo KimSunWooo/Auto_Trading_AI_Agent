@@ -64,10 +64,10 @@ class UrlLibTransport:
         req = Request(url, data=body, headers=dict(headers), method=method)
         timeout = max(connect_timeout, read_timeout)
         try:
-            with urlopen(req, timeout=timeout) as resp:  # noqa: S310 — adapter boundary
+            with urlopen(req, timeout=timeout) as resp:
                 return int(resp.status), resp.read()
         except HTTPError as exc:
-            payload = exc.read() if hasattr(exc, "read") else b""
+            _ = exc.read() if hasattr(exc, "read") else b""
             raise ProviderHttpError(
                 f"HTTP {exc.code}",
                 status_code=int(exc.code),

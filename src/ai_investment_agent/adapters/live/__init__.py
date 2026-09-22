@@ -13,6 +13,10 @@ from ai_investment_agent.adapters.live.diagnostics import (
     ProviderDiagnostics,
     ProviderHealthSnapshot,
 )
+from ai_investment_agent.adapters.live.factory import (
+    build_live_observation_service,
+    live_observation_enabled,
+)
 from ai_investment_agent.adapters.live.http import ProviderHttpClient, ProviderHttpError
 
 __all__ = [
@@ -21,7 +25,9 @@ __all__ = [
     "ProviderHealthSnapshot",
     "ProviderHttpClient",
     "ProviderHttpError",
+    "build_live_observation_service",
     "dart_http_config",
+    "live_observation_enabled",
     "llm_http_config",
     "macro_http_config",
     "mask_secrets",

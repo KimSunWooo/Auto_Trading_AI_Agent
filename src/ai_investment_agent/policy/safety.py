@@ -83,8 +83,17 @@ class SafetyPolicyLayer:
                 }
             )
         book = portfolio if portfolio is not None else PortfolioContext.fixture_empty()
-        if book.source != "fixture":
-            raise ValueError("SafetyPolicyLayer accepts fixture PortfolioContext only")
+        if book.source not in {"fixture", "observation_config"}:
+            raise ValueError(
+                "SafetyPolicyLayer accepts fixture or observation_config PortfolioContext only"
+            )
+        if book.source == "observation_config" and data_mode not in {
+            DataMode.LIVE_OBSERVATION,
+            DataMode.LIVE_SHADOW,
+        }:
+            raise ValueError(
+                "observation_config PortfolioContext is only valid in live observation/shadow modes"
+            )
         budgets = risk_budgets if risk_budgets is not None else RiskBudgets.fixture_open()
         override = human if human is not None else HumanOverride()
         original_pct = proposal.suggested_capital_pct

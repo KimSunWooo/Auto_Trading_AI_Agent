@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
+from ai_investment_agent.adapters.live.factory import (
+    build_live_observation_service,
+    live_observation_enabled,
+)
 from ai_investment_agent.analysis.service import AnalysisService
 from ai_investment_agent.contracts.compatibility import POLICY
 from ai_investment_agent.contracts.encode import envelope_from_proposal
@@ -19,7 +24,7 @@ from ai_investment_agent.contracts.versioning import (
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.enums import ModelHealthStatus
 from ai_investment_agent.domain.errors import DecisionNotFoundError
-from ai_investment_agent.health.report import collect_health
+from ai_investment_agent.health.report import collect_health, provider_health_payload
 
 FORBIDDEN_ORDER_PATHS = (
     "/orders",
@@ -27,6 +32,7 @@ FORBIDDEN_ORDER_PATHS = (
     "/sell",
     "/cancel",
     "/broker",
+    "/live/order",
 )
 
 
@@ -35,8 +41,14 @@ class EvaluateRequest(DomainModel):
     as_of: datetime | None = None
 
 
+def _default_service() -> AnalysisService:
+    if live_observation_enabled():
+        return build_live_observation_service()
+    return AnalysisService()
+
+
 def create_app(service: AnalysisService | None = None) -> FastAPI:
-    analysis = service or AnalysisService()
+    analysis = service or _default_service()
     app = FastAPI(
         title="AI Investment Judgment Agent",
         description=(
@@ -66,6 +78,23 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
     def evaluate(body: EvaluateRequest) -> JSONResponse:
         result = analysis.evaluate(body.ticker, as_of=body.as_of)
         return JSONResponse(result.model_dump(mode="json"))
+
+    @app.post("/observation/evaluate")
+    def observation_evaluate(body: EvaluateRequest) -> JSONResponse:
+        """LIVE_OBSERVATION-safe evaluate. Still never places orders."""
+        if analysis.runtime.data_mode.value != "LIVE_OBSERVATION":
+            # Allow fixture services to refuse accidental misuse.
+            if os.environ.get("AI_DATA_MODE", "FIXTURE").upper() != "LIVE_OBSERVATION":
+                raise HTTPException(
+                    status_code=400,
+                    detail="observation evaluate requires AI_DATA_MODE=LIVE_OBSERVATION",
+                )
+        result = analysis.evaluate(body.ticker, as_of=body.as_of)
+        payload = result.model_dump(mode="json")
+        payload["isOrder"] = False
+        payload["brokerCalled"] = False
+        payload["ordersPlaced"] = 0
+        return JSONResponse(payload)
 
     @app.get("/decisions")
     def list_decisions() -> JSONResponse:
@@ -130,6 +159,25 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
         payload["brokerConnected"] = False
         payload["autoTradingSystemConnected"] = False
         return JSONResponse(payload)
+
+    @app.get("/providers")
+    def list_providers() -> JSONResponse:
+        return JSONResponse(
+            {
+                "providers": [
+                    "market",
+                    "disclosure",
+                    "macro",
+                    "news",
+                    "llm",
+                ],
+                "secretsExposed": False,
+            }
+        )
+
+    @app.get("/providers/health")
+    def providers_health() -> JSONResponse:
+        return JSONResponse(provider_health_payload(analysis))
 
     @app.get("/shadow/portfolio")
     def shadow_portfolio() -> JSONResponse:

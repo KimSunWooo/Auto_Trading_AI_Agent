@@ -13,7 +13,6 @@ from ai_investment_agent.adapters.live.llm.schema import (
     fail_closed_content,
     parse_structured_judgment,
 )
-from ai_investment_agent.domain.enums import CollectionStatus
 from ai_investment_agent.ports.llm import LlmRequest, LlmResponse
 
 PROVIDER = "live-llm"
@@ -112,7 +111,7 @@ class LiveLlmProvider:
             content_text = _extract_message_text(payload)
             parsed = json.loads(content_text)
             if not isinstance(parsed, dict):
-                raise ValueError("LLM JSON root must be an object")
+                raise TypeError("LLM JSON root must be an object")
             judgment = parse_structured_judgment(parsed)
         except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             return self._failure(f"invalid JSON: {exc}", "LLM_INVALID_JSON")
@@ -154,13 +153,13 @@ class LiveLlmProvider:
 
 def _extract_message_text(payload: Any) -> str:
     if not isinstance(payload, dict):
-        raise ValueError("chat completion payload must be an object")
+        raise TypeError("chat completion payload must be an object")
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError("chat completion missing choices")
     message = choices[0].get("message") if isinstance(choices[0], dict) else None
     if not isinstance(message, dict):
-        raise ValueError("chat completion missing message")
+        raise TypeError("chat completion missing message")
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         raise ValueError("chat completion empty content")

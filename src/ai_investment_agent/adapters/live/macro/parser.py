@@ -46,7 +46,7 @@ def parse_macro_payload(
     if isinstance(payload.get("headline"), str) and not items:
         items = [payload]
     if not isinstance(items, list):
-        raise ValueError("macro items must be a list")
+        raise TypeError("macro items must be a list")
 
     records: list[IntelligenceRecord] = []
     for index, item in enumerate(items):

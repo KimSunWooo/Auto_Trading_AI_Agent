@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import Field
-
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.enums import CollectionStatus
 

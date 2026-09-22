@@ -43,7 +43,7 @@ def parse_news_payload(
     collected = _aware(collected_at)
     items = payload.get("articles") or payload.get("items") or payload.get("list") or []
     if not isinstance(items, list):
-        raise ValueError("news items must be a list")
+        raise TypeError("news items must be a list")
 
     records: list[IntelligenceRecord] = []
     for index, item in enumerate(items):

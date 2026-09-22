@@ -79,9 +79,14 @@ def test_analysis_api_evaluate_list_get_replay_and_health():
     names = {item["name"] for item in payload["components"]}
     assert names == {
         "MarketDataHealth",
+        "DisclosureHealth",
+        "MacroHealth",
+        "NewsHealth",
+        "LlmHealth",
         "ExternalDataHealth",
         "ModelHealth",
         "DatabaseHealth",
+        "PersistenceHealth",
         "EventPipelineHealth",
     }
     assert payload["status"] in {"HEALTHY", "DEGRADED", "UNHEALTHY", "UNKNOWN"}

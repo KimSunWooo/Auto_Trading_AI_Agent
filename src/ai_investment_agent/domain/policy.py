@@ -115,13 +115,14 @@ class FixturePositionSlice(DomainModel):
 
 
 class PortfolioContext(DomainModel):
-    """Fixture book used by the policy layer.
+    """Policy-layer book view.
 
     This stage must not read an Auto-Trading-system portfolio.
-    `source` is locked to fixture so a live feed cannot be smuggled in.
+    Allowed sources: fixture (tests) or observation_config (LIVE_OBSERVATION only).
+    ATS portfolio feeds are never accepted.
     """
 
-    source: Literal["fixture"] = "fixture"
+    source: Literal["fixture", "observation_config"] = "fixture"
     used_ai_capital: Decimal = Field(default=Decimal("0"), ge=0)
     used_long_budget: Decimal = Field(default=Decimal("0"), ge=0)
     used_short_budget: Decimal = Field(default=Decimal("0"), ge=0)

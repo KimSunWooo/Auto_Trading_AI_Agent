@@ -10,7 +10,8 @@
 - KIS 주문 API
 - PAPER/REAL 주문
 - OrderManager / Broker / 실제 주문 로직
-- 실제 뉴스, DART, LLM, 시세 API 연결 (이번 단계는 Fixture/Mock)
+- 실제 뉴스, DART, LLM, 시세 API 연결은 **Live Observation**에서만 (`AI_DATA_MODE=LIVE_OBSERVATION`). 기본은 Fixture/Mock
+- KIS/Broker 주문 경로
 
 수익률 최대화가 목표가 아닙니다. 우선순위는 다음과 같습니다.
 
@@ -26,16 +27,24 @@
 
 - Phase 1~10 complete
 - Pre-10.5 stabilization complete (Fail-Closed, Feature semantics, Runtime/Contract boundary, Persistence/CI baseline)
-- **10.5 Live Intelligence Adapter는 아직 구현하지 않았습니다**
-- Live Market Data not connected
-- Live DART not connected
-- Live News not connected
-- Live Macro not connected
-- Live LLM not connected
-- Auto-Trading-system not connected
-- Broker/orders unavailable
+- **10.5 Live Intelligence Adapter complete**
 
-Runtime / Data Mode: `FIXTURE` · `REPLAY` · `LIVE_OBSERVATION` · `LIVE_SHADOW`. 기본 실행은 `FIXTURE`입니다. Profile이 없으면 LIVE로 간주하지 않습니다.
+| Capability | Status |
+| --- | --- |
+| Live Market Data | Connected (read-only JSON feed via `MARKET_DATA_*`) |
+| Live Disclosure (OpenDART) | Connected (`DART_API_KEY`) |
+| Live Macro | Connected (official JSON feed via `MACRO_*`) |
+| Live News | Connected (wire/media JSON feed via `NEWS_*`) |
+| Live LLM | Connected (OpenAI-compatible via `LLM_*`) |
+| Live Observation | Supported (`AI_DATA_MODE=LIVE_OBSERVATION`) |
+| Auto-Trading-system | NOT CONNECTED |
+| Broker | NOT CONNECTED |
+| PAPER Orders | DISABLED |
+| REAL Orders | DISABLED |
+
+Runtime / Data Mode: `FIXTURE` · `REPLAY` · `LIVE_OBSERVATION` · `LIVE_SHADOW`. 기본 실행은 `FIXTURE`입니다. Profile이 없으면 LIVE로 간주하지 않습니다. Fixture fallback은 `FIXTURE`에서만 허용됩니다.
+
+Live Observation capital은 `source=observation_config`이며 실제 계좌가 아닙니다.
 
 ## Persistence
 
@@ -56,9 +65,19 @@ Runtime / Data Mode: `FIXTURE` · `REPLAY` · `LIVE_OBSERVATION` · `LIVE_SHADOW
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-pytest
+NO_NETWORK=1 pytest
 ruff check src tests
 python -m compileall src/ai_investment_agent
+```
+
+환경 변수 이름은 `.env.example`을 참고하세요. 실제 Secret 값은 커밋하지 마세요.
+
+수동 Live Observation smoke (실자격증명 + 네트워크 필요, CI 금지):
+
+```bash
+export AI_DATA_MODE=LIVE_OBSERVATION
+# export MARKET_DATA_BASE_URL=... DART_API_KEY=... MACRO_BASE_URL=... NEWS_BASE_URL=... LLM_API_KEY=...
+python -m ai_investment_agent.cli.observation_smoke --ticker 005930
 ```
 
 분석 API:
@@ -75,7 +94,7 @@ Python 패키지명 충돌을 피하기 위해 루트는 `src/ai_investment_agen
 src/ai_investment_agent/
   domain/        # 모델, 규칙, 직렬화. 바깥 계층을 import하지 않음
   ports/         # MarketData, Event, LLM, Repository, Publisher, Collectors
-  adapters/      # Fixture / in-memory 구현만 존재
+  adapters/      # Fixture / in-memory / live (Market·DART·Macro·News·LLM)
   collectors/    # Market Data vs External Intelligence (fixtures; explicit status)
   intelligence/  # Event Intelligence + fixture regime assessor
   features/      # deterministic Market Context / Feature Engine
@@ -267,7 +286,10 @@ Decision Logs → Offline Evaluation → Candidate Model → Backtest → Shadow
 
 | Method | Path | 역할 |
 | --- | --- | --- |
-| POST | `/analysis/evaluate` | Fixture 데이터로 판단 파이프라인을 실행하고 TradeProposal을 저장 |
+| POST | `/analysis/evaluate` | 판단 파이프라인 실행 → TradeProposal 저장 (FIXTURE 또는 LIVE_OBSERVATION) |
+| POST | `/observation/evaluate` | LIVE_OBSERVATION 전용 evaluate. 주문 없음 |
+| GET | `/providers` | Provider 목록 (secret 미포함) |
+| GET | `/providers/health` | Provider health 요약 |
 | GET | `/decisions` | Journal에 저장된 판단 목록 |
 | GET | `/decisions/{decisionId}` | 단건 조회 |
 | POST | `/decisions/{decisionId}/replay` | 당시 snapshot과 version pin 복원 |
@@ -277,7 +299,7 @@ Decision Logs → Offline Evaluation → Candidate Model → Backtest → Shadow
 | GET | `/contracts/compatibility` | Compatibility Policy |
 | GET | `/decisions/{decisionId}/envelope` | 저장된 판단의 v1 envelope |
 
-만들지 않는 라우트: `POST /orders`, `/buy`, `/sell`, `/cancel`, `/broker/*`. ATS로 push하는 POST도 없습니다.
+만들지 않는 라우트: `POST /orders`, `/buy`, `/sell`, `/cancel`, `/broker/*`, `/live/order`. ATS로 push하는 POST도 없습니다.
 
 1차 완성 흐름:
 
@@ -366,9 +388,13 @@ AI 판단과 Shadow 결과를 비교합니다.
 `GET /health`는 다음을 구분합니다.
 
 - MarketDataHealth
+- DisclosureHealth
+- MacroHealth
+- NewsHealth
+- LlmHealth
 - ExternalDataHealth
 - ModelHealth
-- DatabaseHealth
+- DatabaseHealth / PersistenceHealth
 - EventPipelineHealth
 
 종합 상태: `HEALTHY` · `DEGRADED` · `UNHEALTHY` · `UNKNOWN`. `UNKNOWN`은 `HEALTHY`로 간주하지 않습니다. 컴포넌트 하나가 UNKNOWN이면 종합도 HEALTHY가 될 수 없습니다.

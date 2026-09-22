@@ -6,8 +6,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Mapping
 
-import pytest
-
 from ai_investment_agent.adapters.live.config import (
     CircuitBreakerConfig,
     HttpTimeoutConfig,
