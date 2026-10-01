@@ -76,7 +76,8 @@ def test_news_ok():
         ]
     }
     collector = LiveNewsCollector(
-        client=_client(FakeTransport([(200, json.dumps(payload).encode())]))
+        client=_client(FakeTransport([(200, json.dumps(payload).encode())])),
+        received_at_fn=lambda: AS_OF,
     )
     result = collector.collect("005930", AS_OF)
     assert result.status is CollectionStatus.OK
@@ -90,7 +91,7 @@ def test_news_unavailable_not_empty_ok():
             ProviderHttpError("timeout", error_code="TIMEOUT", retryable=True),
         ]
     )
-    collector = LiveNewsCollector(client=_client(transport))
+    collector = LiveNewsCollector(client=_client(transport), received_at_fn=lambda: AS_OF)
     result = collector.collect("005930", AS_OF)
     assert result.status is CollectionStatus.DATA_UNAVAILABLE
     assert result.status is not CollectionStatus.NO_EVENT
@@ -112,7 +113,8 @@ def test_news_prompt_injection_not_executed_as_instruction():
         ]
     }
     collector = LiveNewsCollector(
-        client=_client(FakeTransport([(200, json.dumps(payload).encode())]))
+        client=_client(FakeTransport([(200, json.dumps(payload).encode())])),
+        received_at_fn=lambda: AS_OF,
     )
     result = collector.collect("005930", AS_OF)
     assert result.status is CollectionStatus.OK
@@ -145,7 +147,8 @@ def test_news_retraction_marker_preserved():
         ]
     }
     collector = LiveNewsCollector(
-        client=_client(FakeTransport([(200, json.dumps(payload).encode())]))
+        client=_client(FakeTransport([(200, json.dumps(payload).encode())])),
+        received_at_fn=lambda: AS_OF,
     )
     result = collector.collect("005930", AS_OF)
     assert result.status is CollectionStatus.OK

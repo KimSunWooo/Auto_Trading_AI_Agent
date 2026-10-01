@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 
@@ -178,11 +179,22 @@ SECRET_ENV_NAMES = (
 )
 
 
+_QUERY_SECRET = re.compile(
+    r"(?i)\b(crtfc_key|api_key|apikey|api-key|token|authorization)=([^&\s]+)"
+)
+
+
 def mask_secrets(text: str) -> str:
-    """Redact known secret values from log/exception text."""
+    """Redact known secret values from log/exception text.
+
+    Raw response bodies must not be interpolated into errors. Query keys
+    and bearer tokens are stripped even when the env value is unknown.
+    """
     masked = text
     for name in SECRET_ENV_NAMES:
         value = os.environ.get(name)
         if value and len(value) >= 8:
             masked = masked.replace(value, f"[{name}_REDACTED]")
+    masked = _QUERY_SECRET.sub(r"\1=[REDACTED]", masked)
+    masked = re.sub(r"(?i)Bearer\s+(?!\[)\S+", "Bearer [REDACTED]", masked)
     return masked

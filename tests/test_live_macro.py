@@ -72,7 +72,8 @@ def test_macro_ok_preserves_consensus_none():
         ]
     }
     collector = LiveMacroCollector(
-        client=_client(FakeTransport([(200, json.dumps(payload).encode())]))
+        client=_client(FakeTransport([(200, json.dumps(payload).encode())])),
+        received_at_fn=lambda: AS_OF,
     )
     result = collector.collect(AS_OF)
     assert result.status is CollectionStatus.OK
@@ -84,7 +85,8 @@ def test_macro_ok_preserves_consensus_none():
 def test_macro_no_event_status():
     payload = {"status": "NO_EVENT", "items": []}
     collector = LiveMacroCollector(
-        client=_client(FakeTransport([(200, json.dumps(payload).encode())]))
+        client=_client(FakeTransport([(200, json.dumps(payload).encode())])),
+        received_at_fn=lambda: AS_OF,
     )
     result = collector.collect(AS_OF)
     assert result.status is CollectionStatus.NO_EVENT
@@ -97,7 +99,7 @@ def test_macro_timeout_not_no_event():
             ProviderHttpError("timeout", error_code="TIMEOUT", retryable=True),
         ]
     )
-    collector = LiveMacroCollector(client=_client(transport))
+    collector = LiveMacroCollector(client=_client(transport), received_at_fn=lambda: AS_OF)
     result = collector.collect(AS_OF)
     assert result.status is CollectionStatus.DATA_UNAVAILABLE
     assert result.status is not CollectionStatus.NO_EVENT

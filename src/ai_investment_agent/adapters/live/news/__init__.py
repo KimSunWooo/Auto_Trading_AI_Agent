@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 
 from ai_investment_agent.adapters.live.config import news_http_config
@@ -26,8 +26,14 @@ class LiveNewsCollector:
     Outages are DATA_UNAVAILABLE — never an empty OK/NO_EVENT disguise.
     """
 
-    def __init__(self, client: ProviderHttpClient | None = None) -> None:
+    def __init__(
+        self,
+        client: ProviderHttpClient | None = None,
+        *,
+        received_at_fn: Callable[[], datetime] | None = None,
+    ) -> None:
         self._client = client or ProviderHttpClient(config=news_http_config())
+        self._received_at = received_at_fn or (lambda: datetime.now(timezone.utc))
         self.last_diagnostics: ProviderDiagnostics | None = None
 
     def collect(
@@ -36,7 +42,7 @@ class LiveNewsCollector:
         as_of: datetime,
         kinds: Sequence[IntelligenceKind] | None = None,
     ) -> CollectionResult[IntelligenceRecord]:
-        requested_at = datetime.now(timezone.utc)
+        requested_at = self._received_at()
         if not self._client.config.base_url:
             self.last_diagnostics = ProviderDiagnostics.unavailable(
                 provider=PROVIDER,
@@ -57,7 +63,7 @@ class LiveNewsCollector:
         try:
             payload = self._client.get_json("/news", params=params)
         except ProviderHttpError as exc:
-            received = datetime.now(timezone.utc)
+            received = self._received_at()
             result, diagnostics = result_from_http_error(
                 exc,
                 as_of=as_of,
@@ -76,7 +82,7 @@ class LiveNewsCollector:
                 )
             return result
 
-        received_at = datetime.now(timezone.utc)
+        received_at = self._received_at()
         if payload is None:
             self.last_diagnostics = ProviderDiagnostics.unavailable(
                 provider=PROVIDER,

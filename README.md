@@ -25,18 +25,29 @@
 
 ## 현재 단계
 
-- Phase 1~10 complete
-- Pre-10.5 stabilization complete (Fail-Closed, Feature semantics, Runtime/Contract boundary, Persistence/CI baseline)
-- **10.5 Live Intelligence Adapter complete**
+- Phase 1~10 구현 완료 (로컬 Fixture / 계약 테스트)
+- Pre-10.5 stabilization 완료 (Fail-Closed, Feature semantics, Runtime/Contract boundary, Persistence/CI baseline)
+- **10.5 Live Intelligence Adapter**: 어댑터 구현 + mocked contract/E2E 검증 완료
+- **10.5.8 Live Observation 정합성**: 시계·일정 격리·LLM 경로·DART 귀속·HTTP fail-closed 회귀 검증 완료
+
+검증 수준을 섞지 않습니다.
+
+| 구분 | 의미 | 현재 |
+| --- | --- | --- |
+| 어댑터 구현 완료 | 포트에 맞는 LIVE collector/LLM 코드가 존재 | 예 (Market, DART, Macro, News, LLM) |
+| mocked contract/E2E 검증 완료 | `NO_NETWORK=1 pytest`가 Fake transport로 계약·파이프라인을 재현 | 예 |
+| 실제 공급자 인증·응답 검증 완료 | 실자격증명 + 실네트워크로 스키마/회사 매핑/시각을 확인 | **실연결 미검증** |
+| 장시간 관찰 검증 완료 | Live Shadow soak | **미실시** |
 
 | Capability | Status |
 | --- | --- |
-| Live Market Data | Connected (read-only JSON feed via `MARKET_DATA_*`) |
-| Live Disclosure (OpenDART) | Connected (`DART_API_KEY`) |
-| Live Macro | Connected (official JSON feed via `MACRO_*`) |
-| Live News | Connected (wire/media JSON feed via `NEWS_*`) |
-| Live LLM | Connected (OpenAI-compatible via `LLM_*`) |
-| Live Observation | Supported (`AI_DATA_MODE=LIVE_OBSERVATION`) |
+| Live Market Data | Adapter implemented; mocked E2E only; 실연결 미검증 |
+| Live Disclosure (OpenDART) | Adapter implemented; mocked E2E only; 실연결 미검증 |
+| Live Macro | Adapter implemented; mocked E2E only; 실연결 미검증 |
+| Live News | Adapter implemented; mocked E2E only; 실연결 미검증 |
+| Live LLM | Adapter implemented; mocked E2E only; 실연결 미검증. 자동 테스트는 유료/실 LLM을 호출하지 않음 |
+| Live Observation | Mocked path supported (`AI_DATA_MODE=LIVE_OBSERVATION`) |
+| Scheduled calendar | LIVE에서 fixture 혼입 없음. 미설정은 `NOT_CONFIGURED` (optional) |
 | Auto-Trading-system | NOT CONNECTED |
 | Broker | NOT CONNECTED |
 | PAPER Orders | DISABLED |
@@ -44,7 +55,84 @@
 
 Runtime / Data Mode: `FIXTURE` · `REPLAY` · `LIVE_OBSERVATION` · `LIVE_SHADOW`. 기본 실행은 `FIXTURE`입니다. Profile이 없으면 LIVE로 간주하지 않습니다. Fixture fallback은 `FIXTURE`에서만 허용됩니다.
 
+Live 기본 시계는 timezone-aware UTC now입니다. `as_of`는 분석 cutoff / 조회 창입니다. `sourceReceivedAt`은 실제 수신 시각이고, `generated_at`은 판단 생성 시각입니다. LIVE에서 과거 `as_of`는 cutoff로만 허용되며, 지금 받은 행을 과거에 수신한 것처럼 소급하지 않습니다.
+
 Live Observation capital은 `source=observation_config`이며 실제 계좌가 아닙니다.
+
+## Vendor-neutral JSON 계약 (MARKET / MACRO / NEWS)
+
+`BASE_URL`만 넣으면 임의의 공급자 API가 호환된다고 보지 않습니다. 아래 계약을 구현한 read-only JSON feed만 어댑터가 파싱합니다. 인증 방식·페이징·필드명이 다르면 전용 어댑터가 필요합니다.
+
+### Market `GET {MARKET_DATA_BASE_URL}/market/{instrument}?asOf=`
+
+객체. 필수 식별: `instrument`. 시세 필드는 선택이나, **값만 있고 timestamp가 없으면 수집하지 않습니다.**
+
+```json
+{
+  "instrument": "005930",
+  "currency": "KRW",
+  "currentPrice": {
+    "value": "71000",
+    "eventOccurredAt": "2026-09-21T08:59:30+00:00",
+    "sourceReceivedAt": "2026-09-21T08:59:31+00:00",
+    "tradableAt": "2026-09-21T08:59:31+00:00"
+  },
+  "volume": { "value": "12000000", "eventOccurredAt": "...", "sourceReceivedAt": "...", "tradableAt": "..." },
+  "dailyBars": [
+    {
+      "open": "70000", "high": "71000", "low": "69000", "close": "70500",
+      "volume": "1000000",
+      "barStart": "2026-09-20T00:00:00+00:00",
+      "barEnd": "2026-09-20T06:00:00+00:00"
+    }
+  ]
+}
+```
+
+OHLCV `volume` 누락은 0으로 채우지 않고 해당 bar를 버립니다.
+
+### Macro `GET {MACRO_BASE_URL}/macro?asOf=`
+
+객체. `items` / `observations` / `list` 중 하나. 빈 배열은 `NO_EVENT`. 항목이 있는데 필수 필드(`headline`/`title`, `publishedAt`/`date`)가 없으면 `SCHEMA_INVALID`.
+
+```json
+{
+  "items": [
+    {
+      "id": "cpi",
+      "kind": "ECONOMIC_INDICATOR",
+      "headline": "CPI",
+      "publishedAt": "2026-09-20T06:00:00+00:00",
+      "actual": "2.1",
+      "consensus": "2.0",
+      "previous": "2.0"
+    }
+  ]
+}
+```
+
+### News `GET {NEWS_BASE_URL}/news?ticker=&asOf=`
+
+객체. `articles` / `items` / `list` 중 하나. 기사 `id`(또는 `url`)로 SHA-256 digest `record_id`를 만듭니다. 같은 기사 재수집은 동일 ID. 수정/철회는 `[CORRECTION]` / `[RETRACTION]`과 `relatedId`로 기존 이벤트에 연결합니다.
+
+```json
+{
+  "articles": [
+    {
+      "id": "n1",
+      "title": "Chip demand steady",
+      "body": "untrusted text",
+      "publishedAt": "2026-09-21T07:00:00+00:00",
+      "kind": "DOMESTIC_NEWS",
+      "ticker": "005930"
+    }
+  ]
+}
+```
+
+OpenDART는 공식 `list.json` 계약이며 `DART_CORP_CODE_<TICKER>` 매핑이 필수입니다. ticker만으로 전체 공시를 긁어 재귀속하지 않습니다. `rcept_dt`는 날짜 정밀도입니다.
+
+LLM은 OpenAI-compatible `/chat/completions` JSON object이며 thesis/사건 요약/위험 설명만 보조합니다. 실패는 fail-closed `NO_TRADE`입니다.
 
 ## Persistence
 

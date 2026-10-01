@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from ai_investment_agent.adapters.live.config import macro_http_config
@@ -24,12 +25,18 @@ class LiveMacroCollector:
     Empty successful feed → NO_EVENT. Transport failure → DATA_UNAVAILABLE.
     """
 
-    def __init__(self, client: ProviderHttpClient | None = None) -> None:
+    def __init__(
+        self,
+        client: ProviderHttpClient | None = None,
+        *,
+        received_at_fn: Callable[[], datetime] | None = None,
+    ) -> None:
         self._client = client or ProviderHttpClient(config=macro_http_config())
+        self._received_at = received_at_fn or (lambda: datetime.now(timezone.utc))
         self.last_diagnostics: ProviderDiagnostics | None = None
 
     def collect(self, as_of: datetime) -> CollectionResult[IntelligenceRecord]:
-        requested_at = datetime.now(timezone.utc)
+        requested_at = self._received_at()
         if not self._client.config.base_url:
             self.last_diagnostics = ProviderDiagnostics.unavailable(
                 provider=PROVIDER,
@@ -46,7 +53,7 @@ class LiveMacroCollector:
         try:
             payload = self._client.get_json("/macro", params={"asOf": as_of.isoformat()})
         except ProviderHttpError as exc:
-            received = datetime.now(timezone.utc)
+            received = self._received_at()
             result, diagnostics = result_from_http_error(
                 exc,
                 as_of=as_of,
@@ -60,7 +67,7 @@ class LiveMacroCollector:
             self.last_diagnostics = diagnostics
             return result
 
-        received_at = datetime.now(timezone.utc)
+        received_at = self._received_at()
         if payload is None:
             self.last_diagnostics = ProviderDiagnostics.unavailable(
                 provider=PROVIDER,

@@ -109,12 +109,18 @@ class LiveLlmProvider:
 
         try:
             content_text = _extract_message_text(payload)
+        except (TypeError, ValueError, KeyError) as exc:
+            return self._failure(f"schema invalid: {exc}", "LLM_SCHEMA_INVALID")
+        try:
             parsed = json.loads(content_text)
+        except json.JSONDecodeError as exc:
+            return self._failure(f"invalid JSON: {exc}", "LLM_INVALID_JSON")
+        try:
             if not isinstance(parsed, dict):
                 raise TypeError("LLM JSON root must be an object")
             judgment = parse_structured_judgment(parsed)
-        except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
-            return self._failure(f"invalid JSON: {exc}", "LLM_INVALID_JSON")
+        except (ValueError, TypeError, KeyError) as exc:
+            return self._failure(f"schema invalid: {exc}", "LLM_SCHEMA_INVALID")
 
         model_name = str(
             (payload or {}).get("model") if isinstance(payload, dict) else self._model

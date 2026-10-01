@@ -26,6 +26,7 @@ class ServiceHealthReport(DomainModel):
     disclosure_health: ComponentHealth | None = None
     macro_health: ComponentHealth | None = None
     news_health: ComponentHealth | None = None
+    scheduled_health: ComponentHealth | None = None
     llm_health: ComponentHealth | None = None
     model_health: ComponentHealth
     database_health: ComponentHealth
@@ -52,6 +53,7 @@ def collect_health(service: AnalysisService) -> ServiceHealthReport:
     news = service.news.collect("005930", as_of)
     disclosure = service.disclosure.collect("005930", as_of)
     macro = service.macro.collect(as_of)
+    scheduled = service.scheduled.collect(as_of, ticker="005930")
     external = service.last_external
     if external is None:
         items = [*news.items, *disclosure.items, *macro.items]
@@ -83,6 +85,7 @@ def collect_health(service: AnalysisService) -> ServiceHealthReport:
         status=_from_collection(news.status),
         detail=_collection_detail(news.status, _provider_label(service.news, "news")),
     )
+    scheduled_component = _scheduled_health(service, scheduled)
     external_component = ComponentHealth(
         name="ExternalDataHealth",
         status=_from_collection(external.status),
@@ -128,6 +131,7 @@ def collect_health(service: AnalysisService) -> ServiceHealthReport:
         disclosure_component,
         macro_component,
         news_component,
+        scheduled_component,
         llm_component,
         external_component,
         model_component,
@@ -142,6 +146,7 @@ def collect_health(service: AnalysisService) -> ServiceHealthReport:
         disclosure_health=disclosure_component,
         macro_health=macro_component,
         news_health=news_component,
+        scheduled_health=scheduled_component,
         llm_health=llm_component,
         model_health=model_component,
         database_health=database_component,
@@ -162,6 +167,7 @@ def provider_health_payload(service: AnalysisService) -> dict[str, Any]:
         report.disclosure_health,
         report.macro_health,
         report.news_health,
+        report.scheduled_health,
         report.llm_health,
         report.event_pipeline_health,
         report.model_health,
@@ -230,6 +236,25 @@ def _provider_label(collector: object, fallback: str) -> str:
     if name.startswith("Fixture"):
         return f"fixture collector={name}"
     return fallback
+
+
+def _scheduled_health(service: AnalysisService, scheduled: CollectionResult) -> ComponentHealth:
+    name = service.scheduled.__class__.__name__
+    error = scheduled.error or ""
+    if "NOT_CONFIGURED" in error or name.startswith("Unconfigured"):
+        return ComponentHealth(
+            name="ScheduledHealth",
+            status=ModelHealthStatus.UNKNOWN,
+            detail=(
+                "NOT_CONFIGURED; optional live calendar; "
+                f"collector={name}; not NO_EVENT"
+            ),
+        )
+    return ComponentHealth(
+        name="ScheduledHealth",
+        status=_from_collection(scheduled.status),
+        detail=_collection_detail(scheduled.status, _provider_label(service.scheduled, "scheduled")),
+    )
 
 
 def _llm_health(service: AnalysisService) -> ComponentHealth:

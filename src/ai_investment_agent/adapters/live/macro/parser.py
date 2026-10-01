@@ -42,31 +42,49 @@ def parse_macro_payload(
     collected_at: datetime,
 ) -> list[IntelligenceRecord]:
     collected = _aware(collected_at)
-    items = payload.get("items") or payload.get("observations") or payload.get("list") or []
-    if isinstance(payload.get("headline"), str) and not items:
+    has_list = any(key in payload for key in ("items", "observations", "list"))
+    items = payload.get("items")
+    if items is None:
+        items = payload.get("observations")
+    if items is None:
+        items = payload.get("list")
+    if isinstance(payload.get("headline"), str) and not has_list:
         items = [payload]
+        has_list = True
+    if not has_list and items is None:
+        raise ValueError("macro payload missing items")
+    if items is None:
+        items = []
     if not isinstance(items, list):
         raise TypeError("macro items must be a list")
+    if not items:
+        return []
 
     records: list[IntelligenceRecord] = []
+    skipped_incomplete = 0
     for index, item in enumerate(items):
         if not isinstance(item, dict):
+            skipped_incomplete += 1
             continue
         headline = str(item.get("headline") or item.get("title") or item.get("series_id") or "").strip()
         if not headline:
+            skipped_incomplete += 1
+            continue
+        published = parse_dt(
+            item.get("publishedAt") or item.get("published_at") or item.get("date")
+        )
+        if published is None:
+            skipped_incomplete += 1
             continue
         kind_raw = str(item.get("kind") or item.get("category") or "ECONOMIC_INDICATOR").upper()
         kind = KIND_MAP.get(kind_raw, IntelligenceKind.ECONOMIC_INDICATOR)
-        published = (
-            parse_dt(item.get("publishedAt") or item.get("published_at") or item.get("date"))
-            or collected
-        )
         received = parse_dt(item.get("sourceReceivedAt") or item.get("source_received_at"))
         if received is None:
-            received = published
+            received = collected
         if received < published:
             received = published
         collected_ts = collected if collected >= received else received
+        tradable = received if received >= published else published
         ts = CollectionTimestamps(
             event_occurred_at=parse_dt(item.get("eventOccurredAt") or item.get("event_occurred_at"))
             or published,
@@ -74,10 +92,8 @@ def parse_macro_payload(
             source_received_at=received,
             collected_at=collected_ts,
             normalized_at=collected_ts,
-            tradable_at=received,
+            tradable_at=tradable,
         )
-        # Store actual/consensus/previous as structured body for Macro Feature Engine.
-        # Never invent consensus.
         actual = item.get("actual")
         consensus = item.get("consensus")
         previous = item.get("previous")
@@ -108,4 +124,6 @@ def parse_macro_payload(
                 raw_ref=source_id,
             )
         )
+    if not records and skipped_incomplete:
+        raise ValueError("macro payload had items but none contained required fields")
     return records

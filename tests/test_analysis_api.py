@@ -82,6 +82,7 @@ def test_analysis_api_evaluate_list_get_replay_and_health():
         "DisclosureHealth",
         "MacroHealth",
         "NewsHealth",
+        "ScheduledHealth",
         "LlmHealth",
         "ExternalDataHealth",
         "ModelHealth",

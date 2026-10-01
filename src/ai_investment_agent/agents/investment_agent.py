@@ -41,12 +41,13 @@ from ai_investment_agent.domain.market import MarketEvent, MarketRegime, MarketS
 from ai_investment_agent.domain.policy import HumanOverride, PortfolioContext, RiskBudgets
 from ai_investment_agent.domain.runtime import DecisionReadiness
 from ai_investment_agent.domain.thesis import InvalidationCondition, InvestmentThesis
-from ai_investment_agent.domain.versions import PROMPT_VERSION
+from ai_investment_agent.domain.versions import MODEL_VERSION, PROMPT_VERSION
 from ai_investment_agent.horizon.selector import HorizonSelector
 from ai_investment_agent.journal.service import JournalService
 from ai_investment_agent.policy.priorities import PRIORITY_ORDER
 from ai_investment_agent.policy.safety import SafetyPolicyLayer
 from ai_investment_agent.policy.utility import UtilityConfig
+from ai_investment_agent.ports.llm import LlmResponse
 from ai_investment_agent.ports.publisher import DecisionPublisher
 from ai_investment_agent.ports.repository import DecisionRepository
 
@@ -70,6 +71,7 @@ class InvestmentJudgmentRequest:
     events: tuple[MarketEvent, ...] = ()
     data_mode: DataMode = DataMode.FIXTURE
     readiness: DecisionReadiness | None = None
+    llm_assist: LlmResponse | None = None
 
 
 class InvestmentJudgmentAgent:
@@ -151,6 +153,12 @@ class InvestmentJudgmentAgent:
 
         desired = _desired(selected, position_status)
         thesis = _thesis(request.ticker, long_view, short_view, selected)
+        thesis, selected, desired, llm_failed, prompt_version, model_version = _apply_llm_assist(
+            request,
+            thesis=thesis,
+            selected=selected,
+            desired=desired,
+        )
         conditions = [
             InvalidationCondition(code=code, description=code.replace("_", " "))
             for code in thesis.invalidations
@@ -215,7 +223,12 @@ class InvestmentJudgmentAgent:
                 }
             )
         proposal = proposal.model_copy(
-            update={"reason_codes": _unique(proposal.reason_codes + selected.reason_codes)}
+            update={
+                "reason_codes": _unique(proposal.reason_codes + selected.reason_codes),
+                "prompt_version": prompt_version,
+                "model_version": model_version,
+                "thesis": thesis,
+            }
         )
         record = DecisionSnapshot(
             decision_id=decision_id,
@@ -233,7 +246,7 @@ class InvestmentJudgmentAgent:
             short_analysis=short_view,
             selected_horizon=selected.choice,
             feature_snapshot=request.feature_snapshot,
-            prompt_version=PROMPT_VERSION,
+            prompt_version=prompt_version,
             data_mode=request.data_mode,
             analysis_as_of=request.snapshot.as_of,
             valid_until=proposal.valid_until,
@@ -243,6 +256,21 @@ class InvestmentJudgmentAgent:
         )
         self._repository.save_snapshot(record)
         self._publisher.publish(proposal)
+        self._journal.record(
+            decision_id,
+            JournalStage.ANALYSIS,
+            "LLM assist applied" if request.llm_assist is not None else "LLM assist not used",
+            reason_codes=[ReasonCode.LLM_FAILED.value] if llm_failed else [],
+            payload={
+                "llmCalled": request.llm_assist is not None,
+                "llmFailed": llm_failed,
+                "modelVersion": model_version,
+                "promptVersion": prompt_version,
+                "llmStatus": (
+                    request.llm_assist.content.get("llmStatus") if request.llm_assist else None
+                ),
+            },
+        )
         self._journal.record(
             decision_id,
             JournalStage.TRADE_PROPOSAL,
@@ -275,6 +303,65 @@ def _desired(selected: HorizonDecision, position_status: PositionThesisStatus) -
     if selected.choice is HorizonChoice.LONG_TERM:
         return DecisionType.LONG_TERM_BUY
     return DecisionType.SHORT_TERM_BUY
+
+
+def _apply_llm_assist(
+    request: InvestmentJudgmentRequest,
+    *,
+    thesis: InvestmentThesis,
+    selected: HorizonDecision,
+    desired: DecisionType,
+) -> tuple[InvestmentThesis, HorizonDecision, DecisionType, bool, str, str]:
+    """Use LLM for thesis/risk text only. Failure is fail-closed NO_TRADE.
+
+    desiredDecision from the model never bypasses readiness, capital, or policy.
+    """
+    assist = request.llm_assist
+    if assist is None:
+        return thesis, selected, desired, False, PROMPT_VERSION, MODEL_VERSION
+    content = assist.content or {}
+    status = str(content.get("llmStatus") or content.get("llm_status") or "")
+    prompt_version = str(content.get("promptVersion") or content.get("prompt_version") or PROMPT_VERSION)
+    model_version = assist.model_name or MODEL_VERSION
+    failed = status == "LLM_FAILED" or str(model_version).endswith("/failed")
+    if failed:
+        selected = selected.model_copy(
+            update={
+                "choice": HorizonChoice.NO_TRADE,
+                "reason_codes": _unique(
+                    list(selected.reason_codes) + [ReasonCode.LLM_FAILED.value]
+                ),
+            }
+        )
+        thesis = InvestmentThesis(
+            headline=str((content.get("thesis") or {}).get("headline") or "LLM unavailable"),
+            summary=str(
+                (content.get("thesis") or {}).get("summary")
+                or "LLM_FAILED. Fail-closed — no fabricated buy."
+            ),
+            bull_case="Not evaluated.",
+            bear_case="Model output unavailable; capital preservation preferred.",
+            time_horizon=Horizon.NONE,
+            risks=["LLM_FAILED"],
+            invalidation_summary="Invalidate any prior LLM-assisted thesis.",
+        )
+        return thesis, selected, DecisionType.NO_TRADE, True, prompt_version, model_version
+
+    raw_thesis = content.get("thesis") or {}
+    if isinstance(raw_thesis, dict):
+        updates = {}
+        if raw_thesis.get("headline"):
+            updates["headline"] = str(raw_thesis["headline"])
+        if raw_thesis.get("summary"):
+            updates["summary"] = str(raw_thesis["summary"])
+        if raw_thesis.get("bullCase") or raw_thesis.get("bull_case"):
+            updates["bull_case"] = str(raw_thesis.get("bullCase") or raw_thesis.get("bull_case"))
+        if raw_thesis.get("bearCase") or raw_thesis.get("bear_case"):
+            updates["bear_case"] = str(raw_thesis.get("bearCase") or raw_thesis.get("bear_case"))
+        if updates:
+            thesis = thesis.model_copy(update=updates)
+    # desiredDecision is advisory text context only — never applied here.
+    return thesis, selected, desired, False, prompt_version, model_version
 
 
 def _thesis(ticker: str, long_view, short_view, selected: HorizonDecision) -> InvestmentThesis:

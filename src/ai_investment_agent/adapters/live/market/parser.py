@@ -6,7 +6,7 @@ Unsupported fields (1m/5m/VWAP/spread) stay None — never fabricated.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from ai_investment_agent.collectors.loading import parse_dt, parse_required_dt
@@ -29,7 +29,24 @@ def _aware(value: datetime) -> datetime:
 def _decimal(value: object | None) -> Decimal | None:
     if value is None or value == "":
         return None
-    return Decimal(str(value))
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _has_source_time(point: dict[str, Any]) -> bool:
+    keys = (
+        "eventOccurredAt",
+        "event_occurred_at",
+        "publishedAt",
+        "published_at",
+        "sourceReceivedAt",
+        "source_received_at",
+        "tradableAt",
+        "tradable_at",
+    )
+    return any(point.get(key) for key in keys)
 
 
 def _point_timestamps(
@@ -47,11 +64,11 @@ def _point_timestamps(
         or published
         or collected_at
     )
-    tradable = (
-        parse_dt(point.get("tradableAt") or point.get("tradable_at"))
-        or received
-        or collected_at
-    )
+    tradable = parse_dt(point.get("tradableAt") or point.get("tradable_at"))
+    if tradable is None:
+        tradable = received if received is not None else collected_at
+    if received is not None and tradable < received:
+        tradable = received
     return CollectionTimestamps(
         event_occurred_at=event,
         published_at=published,
@@ -90,23 +107,14 @@ def parse_market_payload(
             value = _decimal(raw.get("value"))
             if value is None:
                 return
+            if not _has_source_time(raw):
+                return
             ts = _point_timestamps(raw, collected_at=collected)
             record_id = f"live_{kind.value.lower()}_{ticker}_{int(ts.tradable_at.timestamp())}"
         else:
-            value = _decimal(raw)
-            if value is None:
-                return
-            # Scalar without timestamps is treated as just-received; caller freshness
-            # policy still applies against collected_at.
-            ts = CollectionTimestamps(
-                event_occurred_at=collected,
-                published_at=collected,
-                source_received_at=collected,
-                collected_at=collected,
-                normalized_at=collected,
-                tradable_at=collected,
-            )
-            record_id = f"live_{kind.value.lower()}_{ticker}_{int(collected.timestamp())}"
+            # Timestamp-less scalars cannot prove freshness. Skip rather than
+            # minting collected_at as a just-received quote.
+            return
         records.append(
             MarketDataRecord(
                 record_id=record_id,
@@ -137,8 +145,8 @@ def parse_market_payload(
         high = _decimal(bar.get("high"))
         low = _decimal(bar.get("low"))
         close = _decimal(bar.get("close"))
-        volume = _decimal(bar.get("volume")) or Decimal("0")
-        if None in (open_, high, low, close):
+        volume = _decimal(bar.get("volume"))
+        if None in (open_, high, low, close, volume):
             continue
         bar_start = parse_required_dt(bar.get("barStart") or bar.get("bar_start"), "barStart")
         bar_end = parse_required_dt(bar.get("barEnd") or bar.get("bar_end"), "barEnd")

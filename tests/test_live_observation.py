@@ -28,7 +28,9 @@ from ai_investment_agent.adapters.live.observation import (
     observation_portfolio_from_env,
 )
 from ai_investment_agent.api.app import FORBIDDEN_ORDER_PATHS, create_app
-from ai_investment_agent.domain.enums import Action, CollectionStatus, DataMode
+from ai_investment_agent.adapters.live.scheduled import UnconfiguredScheduledEventCollector
+from ai_investment_agent.collectors.intelligence import FixtureScheduledEventCollector
+from ai_investment_agent.domain.enums import Action, CollectionStatus, DataMode, JournalStage
 
 
 AS_OF = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
@@ -141,7 +143,9 @@ def _llm_payload() -> bytes:
 
 def test_live_observation_e2e_data_mode(monkeypatch):
     monkeypatch.setenv("DART_API_KEY", "dart-test-key-xxxxxxxx")
+    monkeypatch.setenv("DART_CORP_CODE_005930", "00126380")
     monkeypatch.setenv("LLM_API_KEY", "sk-test-key-xxxxxxxxxxxx")
+    monkeypatch.setenv("LLM_PROMPT_VERSION", "0.1.0-live")
     market_t = FakeTransport({"/market/": (200, json.dumps(_market_payload()).encode())})
     dart_t = FakeTransport(
         {
@@ -153,6 +157,8 @@ def test_live_observation_e2e_data_mode(monkeypatch):
                         "list": [
                             {
                                 "corp_name": "삼성전자",
+                                "corp_code": "00126380",
+                                "stock_code": "005930",
                                 "report_nm": "주요사항보고서",
                                 "rcept_no": "20260921009999",
                                 "rcept_dt": "20260921",
@@ -212,10 +218,17 @@ def test_live_observation_e2e_data_mode(monkeypatch):
         now_fn=lambda: AS_OF,
         market=LiveMarketDataCollector(client=_client("market", "https://md.example", market_t)),
         disclosure=LiveDisclosureCollector(
-            client=_client("dart", "https://example.test/api", dart_t, "DART_API_KEY")
+            client=_client("dart", "https://example.test/api", dart_t, "DART_API_KEY"),
+            received_at_fn=lambda: AS_OF,
         ),
-        macro=LiveMacroCollector(client=_client("macro", "https://macro.example", macro_t)),
-        news=LiveNewsCollector(client=_client("news", "https://news.example", news_t)),
+        macro=LiveMacroCollector(
+            client=_client("macro", "https://macro.example", macro_t),
+            received_at_fn=lambda: AS_OF,
+        ),
+        news=LiveNewsCollector(
+            client=_client("news", "https://news.example", news_t),
+            received_at_fn=lambda: AS_OF,
+        ),
     )
     service.llm = LiveLlmProvider(client=_client("llm", "https://llm.example/v1", llm_t, "LLM_API_KEY"))
     service.default_capital = observation_capital_from_env()
@@ -235,7 +248,29 @@ def test_live_observation_e2e_data_mode(monkeypatch):
     }
     assert result.snapshot.proposal.data_mode is DataMode.LIVE_OBSERVATION
     assert result.snapshot.proposal.context_fingerprint
-    # BUY is analysis-only if it appears; still not an order.
+    assert result.snapshot.analysis_as_of == AS_OF
+    assert result.snapshot.created_at == AS_OF
+    assert result.snapshot.proposal.generated_at == AS_OF
+    assert market_t.calls
+    assert dart_t.calls
+    assert macro_t.calls
+    assert news_t.calls
+    assert llm_t.calls
+    assert service.market.__class__.__name__ == "LiveMarketDataCollector"
+    assert service.disclosure.__class__.__name__ == "LiveDisclosureCollector"
+    assert isinstance(service.scheduled, UnconfiguredScheduledEventCollector)
+    assert not isinstance(service.scheduled, FixtureScheduledEventCollector)
+    llm_diag = service.provider_diagnostics.get("llm")
+    assert llm_diag is not None
+    assert getattr(llm_diag, "status", None) is CollectionStatus.OK
+    assert result.snapshot.proposal.prompt_version == "0.1.0-live"
+    assert result.snapshot.proposal.model_version == "gpt-test"
+    journal = service.repository.list_journal(result.decision_id)
+    assert any(entry.stage is JournalStage.TRADE_PROPOSAL for entry in journal)
+    assert any(
+        entry.payload.get("llmCalled") is True for entry in journal if entry.payload
+    )
+    assert result.envelope.schema_version == "ai.trade-proposal.v1"
     if result.action is Action.BUY:
         assert result.envelope.is_order is False
 

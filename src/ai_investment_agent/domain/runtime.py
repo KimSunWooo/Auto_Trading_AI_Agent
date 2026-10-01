@@ -30,6 +30,8 @@ class ProviderStatus(DomainModel):
     name: str
     status: CollectionStatus
     error: str | None = None
+    required: bool = True
+    error_code: str | None = None
 
 
 class DecisionReadiness(DomainModel):

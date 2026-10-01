@@ -1,11 +1,19 @@
 """Shared HTTP transport with timeout, bounded retry, rate limit, circuit breaker.
 
 Domain code must not import httpx/SDK vendors directly — adapters use this client.
+
+Timeout budget
+--------------
+``total_seconds`` is a monotonic deadline covering rate-limit wait, backoff,
+and transport. Remaining time is clamped onto connect/read timeouts.
+Circuit failures are counted once per attempt (not once per raise site).
+JSON is parsed before the attempt is treated as a circuit success.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol
@@ -61,6 +69,12 @@ class UrlLibTransport:
         connect_timeout: float,
         read_timeout: float,
     ) -> tuple[int, bytes]:
+        if os.environ.get("NO_NETWORK") == "1":
+            raise ProviderHttpError(
+                "NO_NETWORK=1 blocked real transport",
+                error_code="NETWORK_BLOCKED",
+                retryable=False,
+            )
         req = Request(url, data=body, headers=dict(headers), method=method)
         timeout = max(connect_timeout, read_timeout)
         try:
@@ -90,6 +104,12 @@ class UrlLibTransport:
 
 @dataclass
 class CircuitBreaker:
+    """Failure unit: one record_failure per HTTP attempt.
+
+    Opens when failures reach ``failure_threshold``. Cooldown uses the
+    injected monotonic clock passed to ``allow`` / ``record_failure``.
+    """
+
     failure_threshold: int
     cooldown_seconds: float
     failures: int = 0
@@ -123,17 +143,26 @@ class CircuitBreaker:
 @dataclass
 class RateLimiter:
     max_requests_per_second: float
-    _last_at: float = 0.0
+    monotonic_fn: Callable[[], float] = time.monotonic
+    _last_at: float | None = None
+
+    def required_wait(self) -> float:
+        if self.max_requests_per_second <= 0:
+            return 0.0
+        if self._last_at is None:
+            return 0.0
+        min_interval = 1.0 / self.max_requests_per_second
+        delta = self.monotonic_fn() - self._last_at
+        return max(0.0, min_interval - delta)
+
+    def mark(self) -> None:
+        self._last_at = self.monotonic_fn()
 
     def wait(self, sleep_fn: Callable[[float], None] = time.sleep) -> None:
-        if self.max_requests_per_second <= 0:
-            return
-        min_interval = 1.0 / self.max_requests_per_second
-        now = time.monotonic()
-        delta = now - self._last_at
-        if delta < min_interval:
-            sleep_fn(min_interval - delta)
-        self._last_at = time.monotonic()
+        delay = self.required_wait()
+        if delay > 0:
+            sleep_fn(delay)
+        self.mark()
 
 
 @dataclass
@@ -151,7 +180,10 @@ class ProviderHttpClient:
             failure_threshold=self.config.circuit.failure_threshold,
             cooldown_seconds=self.config.circuit.cooldown_seconds,
         )
-        self.rate_limiter = RateLimiter(self.config.rate_limit.max_requests_per_second)
+        self.rate_limiter = RateLimiter(
+            self.config.rate_limit.max_requests_per_second,
+            monotonic_fn=self.monotonic_fn,
+        )
 
     def get_json(
         self,
@@ -213,29 +245,56 @@ class ProviderHttpClient:
         last_error: ProviderHttpError | None = None
         started = self.monotonic_fn()
         deadline = started + self.config.timeout.total_seconds
+        self.rate_limiter.monotonic_fn = self.monotonic_fn
 
         while attempt < self.config.retry.max_attempts:
             attempt += 1
             self.last_attempt_count = attempt
-            if self.monotonic_fn() > deadline:
+            now = self.monotonic_fn()
+            remaining = deadline - now
+            if remaining <= 0:
                 last_error = ProviderHttpError(
                     "total timeout exceeded",
                     error_code="TIMEOUT",
                     retryable=False,
                 )
+                self.circuit.record_failure(now)
                 break
-            self.rate_limiter.wait(self.sleep_fn)
+
+            wait = self.rate_limiter.required_wait()
+            if wait > remaining:
+                last_error = ProviderHttpError(
+                    "deadline exhausted while rate-limiting",
+                    error_code="TIMEOUT",
+                    retryable=False,
+                )
+                self.circuit.record_failure(self.monotonic_fn())
+                break
+            if wait > 0:
+                self.sleep_fn(wait)
+                remaining = deadline - self.monotonic_fn()
+                if remaining <= 0:
+                    last_error = ProviderHttpError(
+                        "deadline exhausted while rate-limiting",
+                        error_code="TIMEOUT",
+                        retryable=False,
+                    )
+                    self.circuit.record_failure(self.monotonic_fn())
+                    break
+            self.rate_limiter.mark()
+
+            connect_timeout = min(self.config.timeout.connect_seconds, max(remaining, 0.001))
+            read_timeout = min(self.config.timeout.read_seconds, max(remaining, 0.001))
             try:
                 status, raw = self.transport.request(
                     method,
                     url,
                     headers=hdrs,
                     body=body,
-                    connect_timeout=self.config.timeout.connect_seconds,
-                    read_timeout=self.config.timeout.read_seconds,
+                    connect_timeout=connect_timeout,
+                    read_timeout=read_timeout,
                 )
                 if status in self.config.retry.no_retry_statuses:
-                    self.circuit.record_failure(self.monotonic_fn())
                     raise ProviderHttpError(
                         f"HTTP {status}",
                         status_code=status,
@@ -250,30 +309,35 @@ class ProviderHttpClient:
                         retryable=True,
                     )
                 if status < 200 or status >= 300:
-                    self.circuit.record_failure(self.monotonic_fn())
                     raise ProviderHttpError(
                         f"HTTP {status}",
                         status_code=status,
                         error_code=f"HTTP_{status}",
                         retryable=False,
                     )
+                parsed = _parse_json_body(raw)
                 self.circuit.record_success()
-                if not raw:
-                    return None
-                return json.loads(raw.decode("utf-8"))
+                return parsed
             except ProviderHttpError as exc:
                 last_error = exc
+                self.circuit.record_failure(self.monotonic_fn())
                 if not exc.retryable or attempt >= self.config.retry.max_attempts:
-                    self.circuit.record_failure(self.monotonic_fn())
                     raise
+                now = self.monotonic_fn()
+                remaining = deadline - now
                 backoff = min(
                     self.config.retry.max_backoff_seconds,
                     self.config.retry.base_backoff_seconds * (2 ** (attempt - 1)),
                 )
+                if backoff > remaining:
+                    raise ProviderHttpError(
+                        "deadline exhausted during backoff",
+                        error_code="TIMEOUT",
+                        retryable=False,
+                    ) from exc
                 self.sleep_fn(backoff)
 
         assert last_error is not None
-        self.circuit.record_failure(self.monotonic_fn())
         raise last_error
 
     def _url(self, path: str, params: Mapping[str, str] | None) -> str:
@@ -283,3 +347,24 @@ class ProviderHttpClient:
         if params:
             url = f"{url}?{urlencode(params)}"
         return url
+
+
+def _parse_json_body(raw: bytes) -> Any:
+    if not raw:
+        return None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ProviderHttpError(
+            "invalid utf-8 in provider response",
+            error_code="INVALID_ENCODING",
+            retryable=False,
+        ) from exc
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ProviderHttpError(
+            "invalid json in provider response",
+            error_code="INVALID_JSON",
+            retryable=False,
+        ) from exc

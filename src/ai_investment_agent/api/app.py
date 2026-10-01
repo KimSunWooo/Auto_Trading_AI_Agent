@@ -76,7 +76,20 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
 
     @app.post("/analysis/evaluate")
     def evaluate(body: EvaluateRequest) -> JSONResponse:
-        result = analysis.evaluate(body.ticker, as_of=body.as_of)
+        try:
+            result = analysis.evaluate(body.ticker, as_of=body.as_of)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "ANALYSIS_FAILED",
+                    "message": "analysis failed closed",
+                    "isOrder": False,
+                    "ordersPlaced": 0,
+                    "brokerCalled": False,
+                    "reason": type(exc).__name__,
+                },
+            ) from exc
         return JSONResponse(result.model_dump(mode="json"))
 
     @app.post("/observation/evaluate")
@@ -89,7 +102,20 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
                     status_code=400,
                     detail="observation evaluate requires AI_DATA_MODE=LIVE_OBSERVATION",
                 )
-        result = analysis.evaluate(body.ticker, as_of=body.as_of)
+        try:
+            result = analysis.evaluate(body.ticker, as_of=body.as_of)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "ANALYSIS_FAILED",
+                    "message": "analysis failed closed",
+                    "isOrder": False,
+                    "ordersPlaced": 0,
+                    "brokerCalled": False,
+                    "reason": type(exc).__name__,
+                },
+            ) from exc
         payload = result.model_dump(mode="json")
         payload["isOrder"] = False
         payload["brokerCalled"] = False
@@ -169,6 +195,7 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
                     "disclosure",
                     "macro",
                     "news",
+                    "scheduled",
                     "llm",
                 ],
                 "secretsExposed": False,
