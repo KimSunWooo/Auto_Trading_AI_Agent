@@ -35,8 +35,9 @@ def _kind(item: dict[str, Any]) -> IntelligenceKind:
     return IntelligenceKind.FOREIGN_NEWS
 
 
-def stable_news_record_id(source_id: str) -> str:
-    digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:16]
+def stable_news_record_id(source_id: str, *, source: str = SOURCE) -> str:
+    material = f"{source}\0{source_id}"
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
     return f"news_{digest}"
 
 
@@ -63,7 +64,7 @@ def parse_news_payload(
 
     records: list[IntelligenceRecord] = []
     skipped_incomplete = 0
-    for index, item in enumerate(items):
+    for item in items:
         if not isinstance(item, dict):
             skipped_incomplete += 1
             continue
@@ -99,15 +100,21 @@ def parse_news_payload(
             normalized_at=collected_ts,
             tradable_at=tradable,
         )
-        source_id = str(item.get("id") or item.get("url") or "")
+        source_id = str(item.get("id") or item.get("url") or "").strip()
+        item_source = str(item.get("source") or SOURCE)
         if not source_id:
-            source_id = f"news_{index}:{headline}"
+            published_key = str(
+                item.get("publishedAt") or item.get("published_at") or item.get("pubDate") or ""
+            )
+            source_id = "|".join(
+                [headline, published_key, str(item.get("ticker") or ticker or "")]
+            )
         item_ticker = item.get("ticker")
         if item_ticker is None and ticker is not None:
             item_ticker = ticker
         records.append(
             IntelligenceRecord(
-                record_id=stable_news_record_id(source_id),
+                record_id=stable_news_record_id(source_id, source=item_source),
                 kind=kind,
                 headline=headline,
                 timestamps=ts,

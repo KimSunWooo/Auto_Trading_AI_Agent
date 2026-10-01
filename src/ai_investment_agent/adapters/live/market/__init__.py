@@ -9,7 +9,7 @@ from ai_investment_agent.adapters.live.config import market_http_config
 from ai_investment_agent.adapters.live.diagnostics import ProviderDiagnostics
 from ai_investment_agent.adapters.live.errors import result_from_http_error
 from ai_investment_agent.adapters.live.http import ProviderHttpClient, ProviderHttpError
-from ai_investment_agent.adapters.live.market.parser import parse_market_payload
+from ai_investment_agent.adapters.live.market.parser import parse_market_document
 from ai_investment_agent.collectors.query import collect_accessible
 from ai_investment_agent.domain.collection import CollectionResult
 from ai_investment_agent.domain.enums import CollectionStatus, MarketDataKind
@@ -36,6 +36,7 @@ class LiveMarketDataCollector:
         instrument: str,
         as_of: datetime,
         kinds: Sequence[MarketDataKind] | None = None,
+        include_current_receive: bool = False,
     ) -> CollectionResult[MarketDataRecord]:
         requested_at = datetime.now(timezone.utc)
         try:
@@ -101,11 +102,12 @@ class LiveMarketDataCollector:
             )
 
         try:
-            records = parse_market_payload(
+            parsed = parse_market_document(
                 payload,
                 instrument=instrument,
                 collected_at=received_at,
             )
+            records = parsed.records
         except (ValueError, KeyError, TypeError) as exc:
             self.last_diagnostics = ProviderDiagnostics.unavailable(
                 provider=PROVIDER,
@@ -129,9 +131,10 @@ class LiveMarketDataCollector:
                 return False
             return True
 
+        access_as_of = received_at if include_current_receive else as_of
         result = collect_accessible(
             records,
-            as_of=as_of,
+            as_of=access_as_of,
             unavailable=False,
             unavailable_reason="live market unavailable",
             match=match,
@@ -141,6 +144,13 @@ class LiveMarketDataCollector:
             empty_status=CollectionStatus.DATA_UNAVAILABLE,
             empty_error=f"No accessible live market data for {instrument}",
         )
+        if parsed.skipped_incomplete and result.items:
+            result = CollectionResult.degraded(
+                list(result.items),
+                error=f"INCOMPLETE_RECORDS: skipped {parsed.skipped_incomplete} invalid market rows",
+                as_of=access_as_of,
+                stale_item_ids=result.stale_item_ids,
+            )
         latency_ms = (received_at - requested_at).total_seconds() * 1000.0
         if result.status is CollectionStatus.OK:
             self.last_diagnostics = ProviderDiagnostics.ok(
@@ -161,6 +171,16 @@ class LiveMarketDataCollector:
                 attempt_count=self._client.last_attempt_count,
                 error_code="STALE",
                 error_message="market data older than freshness policy",
+            )
+        elif result.status is CollectionStatus.DEGRADED:
+            self.last_diagnostics = ProviderDiagnostics.degraded(
+                provider=PROVIDER,
+                error_code="INCOMPLETE_RECORDS",
+                error_message=result.error or "incomplete market rows",
+                requested_at=requested_at,
+                received_at=received_at,
+                latency_ms=latency_ms,
+                attempt_count=self._client.last_attempt_count,
             )
         else:
             self.last_diagnostics = ProviderDiagnostics.unavailable(

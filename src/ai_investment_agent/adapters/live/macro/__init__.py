@@ -35,7 +35,11 @@ class LiveMacroCollector:
         self._received_at = received_at_fn or (lambda: datetime.now(timezone.utc))
         self.last_diagnostics: ProviderDiagnostics | None = None
 
-    def collect(self, as_of: datetime) -> CollectionResult[IntelligenceRecord]:
+    def collect(
+        self,
+        as_of: datetime,
+        include_current_receive: bool = False,
+    ) -> CollectionResult[IntelligenceRecord]:
         requested_at = self._received_at()
         if not self._client.config.base_url:
             self.last_diagnostics = ProviderDiagnostics.unavailable(
@@ -118,9 +122,10 @@ class LiveMacroCollector:
             )
             return CollectionResult.unavailable(error=f"macro parse failure: {exc}", as_of=as_of)
 
+        access_as_of = received_at if include_current_receive else as_of
         result = collect_accessible(
             records,
-            as_of=as_of,
+            as_of=access_as_of,
             unavailable=False,
             unavailable_reason="macro unavailable",
             match=lambda _record: True,

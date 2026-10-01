@@ -55,7 +55,7 @@
 
 Runtime / Data Mode: `FIXTURE` · `REPLAY` · `LIVE_OBSERVATION` · `LIVE_SHADOW`. 기본 실행은 `FIXTURE`입니다. Profile이 없으면 LIVE로 간주하지 않습니다. Fixture fallback은 `FIXTURE`에서만 허용됩니다.
 
-Live 기본 시계는 timezone-aware UTC now입니다. `as_of`는 분석 cutoff / 조회 창입니다. `sourceReceivedAt`은 실제 수신 시각이고, `generated_at`은 판단 생성 시각입니다. LIVE에서 과거 `as_of`는 cutoff로만 허용되며, 지금 받은 행을 과거에 수신한 것처럼 소급하지 않습니다.
+Live 기본 시계는 timezone-aware UTC now입니다. `as_of` 생략은 현재 관측이며, 판단 cutoff는 해당 사이클의 실제 수신 시각 이후입니다. 명시적 과거 `as_of`는 조회 창/cutoff이고 그 이후 수신 데이터는 소급하지 않습니다. 공급자 시각은 vendor 증거, `sourceReceivedAt`은 이 프로세스가 관측한 시각, `generated_at`은 판단 생성 시각입니다.
 
 Live Observation capital은 `source=observation_config`이며 실제 계좌가 아닙니다.
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -176,10 +177,17 @@ class AnalysisService:
         as_of: datetime | None = None,
         capital_context: CapitalContext | None = None,
     ) -> AnalysisResult:
-        moment = as_of or self._now()
+        request_at = self._now()
+        query_as_of = as_of or request_at
+        include_current_receive = as_of is None and self.runtime.is_live_compatible
         self.last_pipeline_error = None
         try:
-            return self._evaluate(ticker, moment, capital_context)
+            return self._evaluate(
+                ticker,
+                query_as_of,
+                capital_context,
+                include_current_receive=include_current_receive,
+            )
         except Exception as exc:
             self.last_pipeline_error = str(exc)
             raise
@@ -189,13 +197,40 @@ class AnalysisService:
         ticker: str,
         as_of: datetime,
         capital_context: CapitalContext | None,
+        *,
+        include_current_receive: bool = False,
     ) -> AnalysisResult:
-        market = self.market.collect(ticker, as_of)
+        market = _collect(
+            self.market.collect,
+            ticker,
+            as_of,
+            include_current_receive=include_current_receive,
+        )
         self.last_market = market
-        news = self.news.collect(ticker, as_of)
-        disclosure = self.disclosure.collect(ticker, as_of)
-        macro = self.macro.collect(as_of)
-        scheduled = self.scheduled.collect(as_of, ticker=ticker)
+        news = _collect(
+            self.news.collect,
+            ticker,
+            as_of,
+            include_current_receive=include_current_receive,
+        )
+        disclosure = _collect(
+            self.disclosure.collect,
+            ticker,
+            as_of,
+            include_current_receive=include_current_receive,
+        )
+        macro = _collect(
+            self.macro.collect,
+            as_of,
+            include_current_receive=include_current_receive,
+        )
+        scheduled = _collect(
+            self.scheduled.collect,
+            as_of,
+            include_current_receive=include_current_receive,
+            ticker=ticker,
+        )
+        judgment_as_of = self._now() if include_current_receive else as_of
         providers = {
             "news": news,
             "disclosure": disclosure,
@@ -210,21 +245,21 @@ class AnalysisService:
         ]
         external_status, external_error = merge_external_status(providers)
         if external_status is CollectionStatus.OK:
-            self.last_external = CollectionResult.ok(external_items, as_of=as_of)
+            self.last_external = CollectionResult.ok(external_items, as_of=judgment_as_of)
         elif external_status is CollectionStatus.NO_EVENT:
-            self.last_external = CollectionResult.no_event(as_of=as_of)
+            self.last_external = CollectionResult.no_event(as_of=judgment_as_of)
         elif external_status is CollectionStatus.STALE:
-            self.last_external = CollectionResult.stale(external_items, as_of=as_of)
+            self.last_external = CollectionResult.stale(external_items, as_of=judgment_as_of)
         elif external_status is CollectionStatus.DEGRADED:
             self.last_external = CollectionResult.degraded(
                 external_items,
                 error=external_error or "partial external provider outage",
-                as_of=as_of,
+                as_of=judgment_as_of,
             )
         else:
             self.last_external = CollectionResult.unavailable(
                 error=external_error or "external intelligence unavailable",
-                as_of=as_of,
+                as_of=judgment_as_of,
             )
 
         readiness = assess_readiness(
@@ -239,7 +274,7 @@ class AnalysisService:
         series = price_series_from(market.items)
         snapshot = snapshot_from(
             ticker,
-            as_of,
+            judgment_as_of,
             market.items,
             source=(
                 "live-market"
@@ -249,14 +284,14 @@ class AnalysisService:
         )
         context = self.features.build(
             ticker=ticker,
-            as_of=as_of,
+            as_of=judgment_as_of,
             series=series,
             events=analyzed,
             liquidity=_liquidity(market.items),
         )
         llm_assist = self._complete_llm_assist(
             ticker=ticker,
-            as_of=as_of,
+            as_of=judgment_as_of,
             analyzed=analyzed,
             context=context,
         )
@@ -463,6 +498,16 @@ def _liquidity(records: list[MarketDataRecord]) -> float | None:
     return float(value)
 
 
+def _collect(method: Callable[..., Any], *args: Any, include_current_receive: bool, **kwargs: Any):
+    params = inspect.signature(method).parameters
+    accepts = "include_current_receive" in params or any(
+        item.kind is inspect.Parameter.VAR_KEYWORD for item in params.values()
+    )
+    if accepts:
+        return method(*args, include_current_receive=include_current_receive, **kwargs)
+    return method(*args, **kwargs)
+
+
 def merge_external_status(
     providers: dict[str, CollectionResult],
 ) -> tuple[CollectionStatus, str | None]:
@@ -479,22 +524,29 @@ def merge_external_status(
         )
     ]
     stale = [name for name, status in statuses.items() if status is CollectionStatus.STALE]
+    degraded = [
+        name
+        for name, result in providers.items()
+        if result.status is CollectionStatus.DEGRADED
+    ]
     ok_or_quiet = [
         name
         for name, status in statuses.items()
         if status in {CollectionStatus.OK, CollectionStatus.NO_EVENT}
     ]
-    if unavailable and not has_items and not stale and not ok_or_quiet:
+    if unavailable and not has_items and not stale and not degraded and not ok_or_quiet:
         return CollectionStatus.DATA_UNAVAILABLE, "external intelligence unavailable: " + ",".join(
             unavailable
         )
-    if unavailable or stale:
-        if ok_or_quiet or has_items:
+    if unavailable or stale or degraded:
+        if ok_or_quiet or has_items or degraded:
             detail = []
             if unavailable:
                 detail.append("unavailable=" + ",".join(unavailable))
             if stale:
                 detail.append("stale=" + ",".join(stale))
+            if degraded:
+                detail.append("degraded=" + ",".join(degraded))
             return CollectionStatus.DEGRADED, "partial external provider outage: " + " ".join(detail)
         if stale:
             return CollectionStatus.STALE, None

@@ -47,7 +47,12 @@ class LiveDisclosureCollector:
         self._received_at = received_at_fn or (lambda: datetime.now(timezone.utc))
         self.last_diagnostics: ProviderDiagnostics | None = None
 
-    def collect(self, ticker: str, as_of: datetime) -> CollectionResult[IntelligenceRecord]:
+    def collect(
+        self,
+        ticker: str,
+        as_of: datetime,
+        include_current_receive: bool = False,
+    ) -> CollectionResult[IntelligenceRecord]:
         requested_at = self._received_at()
         api_key = self._client.config.api_key()
         if not api_key and not self._client.config.base_url.startswith("https://example"):
@@ -201,6 +206,19 @@ class LiveDisclosureCollector:
                 incomplete_reason = "PAGINATION_INCOMPLETE: page cap reached"
                 break
 
+        seen: set[str] = set()
+        unique_rows: list[object] = []
+        for row in list(merged.get("list") or []):
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("rcept_no") or "").strip()
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            unique_rows.append(row)
+        merged["list"] = unique_rows
+
         try:
             records, rejected = dart_list_to_records(
                 merged,
@@ -235,9 +253,10 @@ class LiveDisclosureCollector:
                 freshness_class=FreshnessClass.DAILY,
             )
 
+        access_as_of = received_at if include_current_receive else as_of
         result = collect_accessible(
             records,
-            as_of=as_of,
+            as_of=access_as_of,
             unavailable=False,
             unavailable_reason="dart unavailable",
             match=lambda record: record.ticker == ticker,

@@ -41,6 +41,7 @@ class LiveNewsCollector:
         ticker: str | None,
         as_of: datetime,
         kinds: Sequence[IntelligenceKind] | None = None,
+        include_current_receive: bool = False,
     ) -> CollectionResult[IntelligenceRecord]:
         requested_at = self._received_at()
         if not self._client.config.base_url:
@@ -150,9 +151,10 @@ class LiveNewsCollector:
                 return True
             return record.ticker == ticker or record.ticker is None
 
+        access_as_of = received_at if include_current_receive else as_of
         result = collect_accessible(
             records,
-            as_of=as_of,
+            as_of=access_as_of,
             unavailable=False,
             unavailable_reason="news unavailable",
             match=match,

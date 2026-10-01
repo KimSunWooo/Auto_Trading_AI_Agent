@@ -6,6 +6,8 @@ Timeout budget
 --------------
 ``total_seconds`` is a monotonic deadline covering rate-limit wait, backoff,
 and transport. Remaining time is clamped onto connect/read timeouts.
+``UrlLibTransport`` cannot abort a socket that keeps delivering bytes after
+that deadline; a late completion is rejected and is not a circuit success.
 Circuit failures are counted once per attempt (not once per raise site).
 JSON is parsed before the attempt is treated as a circuit success.
 """
@@ -294,6 +296,12 @@ class ProviderHttpClient:
                     connect_timeout=connect_timeout,
                     read_timeout=read_timeout,
                 )
+                if self.monotonic_fn() > deadline:
+                    raise ProviderHttpError(
+                        "deadline exceeded before response accepted",
+                        error_code="TIMEOUT",
+                        retryable=False,
+                    )
                 if status in self.config.retry.no_retry_statuses:
                     raise ProviderHttpError(
                         f"HTTP {status}",

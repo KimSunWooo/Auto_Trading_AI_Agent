@@ -5,6 +5,7 @@ Unsupported fields (1m/5m/VWAP/spread) stay None — never fabricated.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -80,12 +81,31 @@ def _point_timestamps(
     )
 
 
+@dataclass
+class MarketParseOutcome:
+    records: list[MarketDataRecord]
+    skipped_incomplete: int
+
+
 def parse_market_payload(
     payload: dict[str, Any],
     *,
     instrument: str,
     collected_at: datetime,
 ) -> list[MarketDataRecord]:
+    return parse_market_document(
+        payload,
+        instrument=instrument,
+        collected_at=collected_at,
+    ).records
+
+
+def parse_market_document(
+    payload: dict[str, Any],
+    *,
+    instrument: str,
+    collected_at: datetime,
+) -> MarketParseOutcome:
     """Build records from a read-only market JSON document.
 
     Expected shape (all quote fields optional; missing stays absent):
@@ -97,23 +117,28 @@ def parse_market_payload(
     collected = _aware(collected_at)
     currency = payload.get("currency") or "KRW"
     records: list[MarketDataRecord] = []
+    skipped_incomplete = 0
     ticker = str(payload.get("instrument") or instrument)
 
     def add_scalar(kind: MarketDataKind, key: str) -> None:
+        nonlocal skipped_incomplete
         raw = payload.get(key)
         if raw is None:
             return
         if isinstance(raw, dict):
             value = _decimal(raw.get("value"))
             if value is None:
+                skipped_incomplete += 1
                 return
             if not _has_source_time(raw):
+                skipped_incomplete += 1
                 return
             ts = _point_timestamps(raw, collected_at=collected)
             record_id = f"live_{kind.value.lower()}_{ticker}_{int(ts.tradable_at.timestamp())}"
         else:
             # Timestamp-less scalars cannot prove freshness. Skip rather than
             # minting collected_at as a just-received quote.
+            skipped_incomplete += 1
             return
         records.append(
             MarketDataRecord(
@@ -140,6 +165,7 @@ def parse_market_payload(
         bars = []
     for index, bar in enumerate(bars):
         if not isinstance(bar, dict):
+            skipped_incomplete += 1
             continue
         open_ = _decimal(bar.get("open"))
         high = _decimal(bar.get("high"))
@@ -147,6 +173,7 @@ def parse_market_payload(
         close = _decimal(bar.get("close"))
         volume = _decimal(bar.get("volume"))
         if None in (open_, high, low, close, volume):
+            skipped_incomplete += 1
             continue
         bar_start = parse_required_dt(bar.get("barStart") or bar.get("bar_start"), "barStart")
         bar_end = parse_required_dt(bar.get("barEnd") or bar.get("bar_end"), "barEnd")
@@ -181,7 +208,7 @@ def parse_market_payload(
             )
         )
 
-    return records
+    return MarketParseOutcome(records=records, skipped_incomplete=skipped_incomplete)
 
 
 def default_daily_window(as_of: datetime, days: int = 180) -> tuple[str, str]:
