@@ -38,6 +38,7 @@
 | mocked contract/E2E 검증 완료 | `NO_NETWORK=1 pytest`가 Fake transport로 계약·파이프라인을 재현 | 예 |
 | 실제 공급자 인증·응답 검증 완료 | 실자격증명 + 실네트워크로 스키마/회사 매핑/시각을 확인 | **실연결 미검증** |
 | 장시간 관찰 검증 완료 | Live Shadow soak | **미실시** |
+| 10.5.8 수정본 인수 | cutoff/동시성 증거 + 수동 공급자 runbook | `docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md` (실연결 미검증) |
 
 | Capability | Status |
 | --- | --- |

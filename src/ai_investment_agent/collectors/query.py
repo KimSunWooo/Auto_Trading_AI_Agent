@@ -27,8 +27,14 @@ def collect_accessible(
     id_of: Callable[[T], str],
     empty_status: CollectionStatus,
     empty_error: str | None = None,
+    reject_future_event_occurred: bool = False,
 ) -> CollectionResult[T]:
-    """Shared collection query. Empty success is never returned as OK."""
+    """Shared collection query. Empty success is never returned as OK.
+
+    ``reject_future_event_occurred`` is Live-only. Fixture/replay calendar rows
+    may describe a future eventOccurredAt that was already published; those
+    collectors keep the default (False) so this flag does not change them.
+    """
     if unavailable:
         return CollectionResult.unavailable(error=unavailable_reason, as_of=as_of)
 
@@ -36,7 +42,14 @@ def collect_accessible(
     for record in records:
         if not match(record):
             continue
-        if not is_accessible_at(timestamps_of(record), as_of):
+        timestamps = timestamps_of(record)
+        if not is_accessible_at(timestamps, as_of):
+            continue
+        if (
+            reject_future_event_occurred
+            and timestamps.event_occurred_at is not None
+            and timestamps.event_occurred_at > as_of
+        ):
             continue
         matched.append(record)
 

@@ -133,6 +133,7 @@ class LiveMacroCollector:
             freshness_of=lambda record: record.freshness_class,
             id_of=lambda record: record.record_id,
             empty_status=CollectionStatus.NO_EVENT,
+            reject_future_event_occurred=True,
         )
         latency_ms = (received_at - requested_at).total_seconds() * 1000.0
         if result.status is CollectionStatus.OK:

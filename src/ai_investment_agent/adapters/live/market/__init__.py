@@ -143,6 +143,7 @@ class LiveMarketDataCollector:
             id_of=lambda record: record.record_id,
             empty_status=CollectionStatus.DATA_UNAVAILABLE,
             empty_error=f"No accessible live market data for {instrument}",
+            reject_future_event_occurred=True,
         )
         if parsed.skipped_incomplete and result.items:
             result = CollectionResult.degraded(

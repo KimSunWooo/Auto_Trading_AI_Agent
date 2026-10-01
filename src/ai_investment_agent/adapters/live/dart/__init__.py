@@ -264,6 +264,7 @@ class LiveDisclosureCollector:
             freshness_of=lambda record: record.freshness_class,
             id_of=lambda record: record.record_id,
             empty_status=CollectionStatus.NO_EVENT,
+            reject_future_event_occurred=True,
         )
         if incomplete:
             result = CollectionResult.degraded(
