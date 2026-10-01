@@ -46,12 +46,14 @@ class LiveDisclosureCollector:
         self._client = client or ProviderHttpClient(config=dart_http_config())
         self._received_at = received_at_fn or (lambda: datetime.now(timezone.utc))
         self.last_diagnostics: ProviderDiagnostics | None = None
+        self.last_collection_stats: dict[str, object] | None = None
 
     def collect(
         self,
         ticker: str,
         as_of: datetime,
         include_current_receive: bool = False,
+        page_cap: int | None = None,
     ) -> CollectionResult[IntelligenceRecord]:
         requested_at = self._received_at()
         api_key = self._client.config.api_key()
@@ -79,6 +81,15 @@ class LiveDisclosureCollector:
                 requested_at=requested_at,
                 received_at=requested_at,
             )
+            self.last_collection_stats = {
+                "pagesFetched": 0,
+                "totalPageReported": None,
+                "rawRowCount": 0,
+                "uniqueRowCount": 0,
+                "accessibleCount": 0,
+                "rejectedCompanyMismatch": 0,
+                "paginationComplete": False,
+            }
             return CollectionResult.unavailable(
                 error="DART MISSING_CORP_CODE: ticker↔corp_code mapping is required",
                 as_of=as_of,
@@ -93,8 +104,9 @@ class LiveDisclosureCollector:
         incomplete = False
         incomplete_reason = ""
         received_at = requested_at
+        cap = PAGE_CAP if page_cap is None else max(1, min(int(page_cap), PAGE_CAP))
 
-        while page_no <= min(total_page, PAGE_CAP):
+        while page_no <= min(total_page, cap):
             params = {
                 "crtfc_key": api_key or "",
                 "bgn_de": start.strftime("%Y%m%d"),
@@ -201,13 +213,14 @@ class LiveDisclosureCollector:
             else:
                 total_page = page_no
             page_no += 1
-            if page_no > PAGE_CAP and page_no <= total_page:
+            if page_no > cap and page_no <= total_page:
                 incomplete = True
                 incomplete_reason = "PAGINATION_INCOMPLETE: page cap reached"
                 break
 
         seen: set[str] = set()
         unique_rows: list[object] = []
+        raw_row_count = len(list(merged.get("list") or []))
         for row in list(merged.get("list") or []):
             if not isinstance(row, dict):
                 continue
@@ -236,6 +249,15 @@ class LiveDisclosureCollector:
                 received_at=received_at,
                 attempt_count=self._client.last_attempt_count,
             )
+            self.last_collection_stats = {
+                "pagesFetched": max(0, page_no - 1),
+                "totalPageReported": total_page,
+                "rawRowCount": raw_row_count,
+                "uniqueRowCount": len(unique_rows),
+                "accessibleCount": 0,
+                "rejectedCompanyMismatch": 0,
+                "paginationComplete": not incomplete,
+            }
             return CollectionResult.unavailable(error=f"dart parse failure: {exc}", as_of=as_of)
 
         if rejected and not records and not incomplete:
@@ -247,6 +269,15 @@ class LiveDisclosureCollector:
                 received_at=received_at,
                 attempt_count=self._client.last_attempt_count,
             )
+            self.last_collection_stats = {
+                "pagesFetched": max(0, page_no - 1),
+                "totalPageReported": total_page,
+                "rawRowCount": raw_row_count,
+                "uniqueRowCount": len(unique_rows),
+                "accessibleCount": 0,
+                "rejectedCompanyMismatch": rejected,
+                "paginationComplete": not incomplete,
+            }
             return CollectionResult.unavailable(
                 error="DART COMPANY_MISMATCH: response company did not match ticker mapping",
                 as_of=as_of,
@@ -301,4 +332,13 @@ class LiveDisclosureCollector:
                 error_code=result.status.value if not incomplete else "PAGINATION_INCOMPLETE",
                 error_message=result.error,
             )
+        self.last_collection_stats = {
+            "pagesFetched": max(0, page_no - 1),
+            "totalPageReported": total_page,
+            "rawRowCount": raw_row_count,
+            "uniqueRowCount": len(unique_rows),
+            "accessibleCount": len(result.items),
+            "rejectedCompanyMismatch": rejected,
+            "paginationComplete": not incomplete,
+        }
         return result

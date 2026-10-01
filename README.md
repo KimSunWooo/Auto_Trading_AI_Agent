@@ -169,6 +169,15 @@ export AI_DATA_MODE=LIVE_OBSERVATION
 python -m ai_investment_agent.cli.observation_smoke --ticker 005930
 ```
 
+DART 단독 설정 점검 (네트워크 없음). `--live`는 사용자가 직접 실행한다:
+
+```bash
+python -m ai_investment_agent.cli.dart_probe --ticker 005930
+# python -m ai_investment_agent.cli.dart_probe --ticker 005930 --live
+```
+
+절차: `docs/verification/DART-MANUAL-PROBE.md`
+
 분석 API:
 
 ```bash

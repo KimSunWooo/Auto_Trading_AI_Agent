@@ -593,7 +593,9 @@ def test_concurrent_evaluate_responses_stay_on_own_execution(monkeypatch):
     if service.last_market.items:
         assert last_instruments <= {"005930", "000660"}
     health = collect_health(service)
-    assert health.event_pipeline_health.detail == "event intelligence pipeline last run succeeded"
+    assert health.event_pipeline_health.detail.startswith(
+        "event intelligence pipeline last run succeeded"
+    )
     assert health.llm_health is not None
 
 
@@ -647,8 +649,10 @@ def test_health_last_run_is_process_level_not_request_scoped(monkeypatch):
     assert first.decision_id
     assert service.last_market is not None
     assert service.last_market.status is CollectionStatus.OK
-    assert health.event_pipeline_health.detail == "event intelligence pipeline last run succeeded"
-    # collect_health re-collects news/disclosure/macro/scheduled and uses
-    # last_market when present. That snapshot is process-level last-writer,
-    # not a per-request handle.
+    assert health.event_pipeline_health.detail.startswith(
+        "event intelligence pipeline last run succeeded"
+    )
+    # collect_health is observation-only. It reads last_market / last
+    # diagnostics and does not re-collect. That snapshot is process-level
+    # last-writer, not a per-request handle.
     assert "has not run" not in health.event_pipeline_health.detail

@@ -1,22 +1,37 @@
-"""Component and overall health. UNKNOWN is never treated as HEALTHY."""
+"""Component and overall health. UNKNOWN is never treated as HEALTHY.
+
+GET /health and GET /providers/health are observation-only. They read the
+last process snapshot and never call collector.collect or the LLM.
+That last snapshot is not a specific decisionId.
+"""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import Field
 
+from ai_investment_agent.adapters.live.diagnostics import ProviderDiagnostics
 from ai_investment_agent.analysis.service import AnalysisService
 from ai_investment_agent.domain.base import DomainModel
 from ai_investment_agent.domain.collection import CollectionResult
 from ai_investment_agent.domain.enums import CollectionStatus, DataMode, ModelHealthStatus
 from ai_investment_agent.domain.evaluation import ModelHealthMetrics
+from ai_investment_agent.domain.runtime import ProviderStatus
+
+# Display-only. Does not change collection freshness or decision gates.
+OBSERVATION_STALE_AFTER_SECONDS = 900.0
 
 
 class ComponentHealth(DomainModel):
     name: str
     status: ModelHealthStatus
     detail: str = ""
+    last_observed_at: datetime | None = None
+    observation_age_seconds: float | None = None
+    observation_stale: bool = False
+    observation_source: str = "unobserved"
 
 
 class ServiceHealthReport(DomainModel):
@@ -41,6 +56,9 @@ class ServiceHealthReport(DomainModel):
     terminal_artifact: str = "TradeProposal"
     mode: str = "judgment_only"
     components: list[ComponentHealth] = Field(default_factory=list)
+    observation_only: Literal[True] = True
+    probes_on_read: Literal[False] = False
+    scoped_to_decision_id: None = None
 
     @property
     def treated_as_healthy(self) -> bool:
@@ -48,60 +66,51 @@ class ServiceHealthReport(DomainModel):
 
 
 def collect_health(service: AnalysisService) -> ServiceHealthReport:
-    as_of = service._now()
-    market = service.last_market or service.market.collect("005930", as_of)
-    news = service.news.collect("005930", as_of)
-    disclosure = service.disclosure.collect("005930", as_of)
-    macro = service.macro.collect(as_of)
-    scheduled = service.scheduled.collect(as_of, ticker="005930")
-    external = service.last_external
-    if external is None:
-        items = [*news.items, *disclosure.items, *macro.items]
-        if items:
-            external = CollectionResult.ok(items, as_of=as_of)
-        else:
-            external = CollectionResult.no_event(as_of=as_of)
-
-    market_component = ComponentHealth(
-        name="MarketDataHealth",
-        status=_from_collection(market.status),
-        detail=_collection_detail(
-            market.status,
-            _provider_label(service.market, "market"),
-        ),
-    )
-    disclosure_component = ComponentHealth(
-        name="DisclosureHealth",
-        status=_from_collection(disclosure.status),
-        detail=_collection_detail(disclosure.status, _provider_label(service.disclosure, "disclosure")),
-    )
-    macro_component = ComponentHealth(
-        name="MacroHealth",
-        status=_from_collection(macro.status),
-        detail=_collection_detail(macro.status, _provider_label(service.macro, "macro")),
-    )
-    news_component = ComponentHealth(
+    """Process-level last observation. Does not collect or open sockets."""
+    now = service._now()
+    market_component = _market_health(service, now)
+    news_component = _provider_component(
+        service,
+        now,
         name="NewsHealth",
-        status=_from_collection(news.status),
-        detail=_collection_detail(news.status, _provider_label(service.news, "news")),
+        collector=service.news,
+        diagnostics_key="news",
+        readiness_name="news",
+        fallback="news",
     )
-    scheduled_component = _scheduled_health(service, scheduled)
-    external_component = ComponentHealth(
-        name="ExternalDataHealth",
-        status=_from_collection(external.status),
-        detail=_collection_detail(external.status, "aggregated news/disclosure/macro"),
+    disclosure_component = _provider_component(
+        service,
+        now,
+        name="DisclosureHealth",
+        collector=service.disclosure,
+        diagnostics_key="disclosure",
+        readiness_name="disclosure",
+        fallback="disclosure",
     )
-    llm_component = _llm_health(service)
+    macro_component = _provider_component(
+        service,
+        now,
+        name="MacroHealth",
+        collector=service.macro,
+        diagnostics_key="macro",
+        readiness_name="macro",
+        fallback="macro",
+    )
+    scheduled_component = _scheduled_health(service, now)
+    external_component = _external_health(service, now)
+    llm_component = _llm_health(service, now)
     metrics = service.model_health.assess(service.repository.list_snapshots())
     model_component = ComponentHealth(
         name="ModelHealth",
         status=metrics.status,
         detail=_model_detail(metrics),
+        observation_source="in_process",
     )
     database_component = ComponentHealth(
         name="DatabaseHealth",
         status=ModelHealthStatus.HEALTHY,
         detail="in-memory decision journal is reachable; not a broker database",
+        observation_source="in_process",
     )
     persistence_component = ComponentHealth(
         name="PersistenceHealth",
@@ -110,22 +119,9 @@ def collect_health(service: AnalysisService) -> ServiceHealthReport:
             "InMemory persistence OK for LIVE_OBSERVATION smoke; "
             "durable store required before long-running LIVE_SHADOW soak"
         ),
+        observation_source="in_process",
     )
-    _ = service.repository.list_snapshots()
-    if service.last_pipeline_error:
-        pipeline_status = ModelHealthStatus.UNHEALTHY
-        pipeline_detail = service.last_pipeline_error
-    elif service.last_market is None:
-        pipeline_status = ModelHealthStatus.UNKNOWN
-        pipeline_detail = "event pipeline has not run in this process yet"
-    else:
-        pipeline_status = ModelHealthStatus.HEALTHY
-        pipeline_detail = "event intelligence pipeline last run succeeded"
-    pipeline_component = ComponentHealth(
-        name="EventPipelineHealth",
-        status=pipeline_status,
-        detail=pipeline_detail,
-    )
+    pipeline_component = _pipeline_health(service)
     components = [
         market_component,
         disclosure_component,
@@ -180,6 +176,13 @@ def provider_health_payload(service: AnalysisService) -> dict[str, Any]:
                 "name": component.name,
                 "status": component.status.value,
                 "detail": component.detail,
+                "lastObservedAt": (
+                    component.last_observed_at.isoformat()
+                    if component.last_observed_at is not None
+                    else None
+                ),
+                "observationStale": component.observation_stale,
+                "observationSource": component.observation_source,
             }
         )
     return {
@@ -189,6 +192,9 @@ def provider_health_payload(service: AnalysisService) -> dict[str, Any]:
         "brokerConnected": False,
         "autoTradingSystemConnected": False,
         "dataMode": service.runtime.data_mode.value,
+        "observationOnly": True,
+        "probesOnRead": False,
+        "scopedToDecisionId": None,
     }
 
 
@@ -238,43 +244,285 @@ def _provider_label(collector: object, fallback: str) -> str:
     return fallback
 
 
-def _scheduled_health(service: AnalysisService, scheduled: CollectionResult) -> ComponentHealth:
+def _age_fields(observed_at: datetime | None, now: datetime) -> tuple[float | None, bool]:
+    if observed_at is None:
+        return None, False
+    age = (now - observed_at).total_seconds()
+    return age, age > OBSERVATION_STALE_AFTER_SECONDS
+
+
+def _component(
+    *,
+    name: str,
+    status: ModelHealthStatus,
+    detail: str,
+    now: datetime,
+    observed_at: datetime | None,
+    source: str,
+) -> ComponentHealth:
+    age, stale = _age_fields(observed_at, now)
+    extra = ""
+    if source == "unobserved":
+        extra = "; not observed in this process; UNKNOWN is not HEALTHY"
+    elif source == "not_configured":
+        extra = ""
+    elif stale:
+        extra = f"; observation aged ({int(age)}s) — status is last observation, not a new probe"
+    else:
+        extra = "; process last observation, not a decisionId"
+    return ComponentHealth(
+        name=name,
+        status=status,
+        detail=detail + extra,
+        last_observed_at=observed_at,
+        observation_age_seconds=age,
+        observation_stale=stale,
+        observation_source=source,
+    )
+
+
+def _diagnostics(service: AnalysisService, collector: object, key: str) -> ProviderDiagnostics | None:
+    direct = getattr(collector, "last_diagnostics", None)
+    if isinstance(direct, ProviderDiagnostics):
+        return direct
+    captured = getattr(service, "provider_diagnostics", {}) or {}
+    value = captured.get(key)
+    if isinstance(value, ProviderDiagnostics):
+        return value
+    return None
+
+
+def _captured_status(service: AnalysisService, key: str) -> CollectionStatus | None:
+    captured = getattr(service, "provider_diagnostics", {}) or {}
+    value = captured.get(key)
+    if isinstance(value, ProviderDiagnostics):
+        return value.status
+    if isinstance(value, dict):
+        raw = value.get("status")
+        if raw in CollectionStatus._value2member_map_:
+            return CollectionStatus(raw)
+    return None
+
+
+def _readiness_row(service: AnalysisService, name: str) -> ProviderStatus | None:
+    readiness = service.last_readiness
+    if readiness is None:
+        return None
+    for row in readiness.providers:
+        if row.name == name:
+            return row
+    return None
+
+
+def _observed_status(
+    *,
+    result: CollectionResult | None,
+    diagnostics: ProviderDiagnostics | None,
+    captured: CollectionStatus | None,
+    readiness: ProviderStatus | None,
+) -> tuple[CollectionStatus | None, datetime | None, str]:
+    if result is not None:
+        return result.status, result.as_of, "process_last"
+    if diagnostics is not None:
+        return diagnostics.status, diagnostics.received_at, "process_last"
+    if captured is not None:
+        return captured, None, "process_last"
+    if readiness is not None:
+        return readiness.status, None, "process_last"
+    return None, None, "unobserved"
+
+
+def _market_health(service: AnalysisService, now: datetime) -> ComponentHealth:
+    status, observed_at, source = _observed_status(
+        result=service.last_market,
+        diagnostics=_diagnostics(service, service.market, "market"),
+        captured=_captured_status(service, "market"),
+        readiness=None,
+    )
+    label = _provider_label(service.market, "market")
+    if status is None:
+        return _component(
+            name="MarketDataHealth",
+            status=ModelHealthStatus.UNKNOWN,
+            detail="unobserved; " + label,
+            now=now,
+            observed_at=None,
+            source="unobserved",
+        )
+    return _component(
+        name="MarketDataHealth",
+        status=_from_collection(status),
+        detail=_collection_detail(status, label),
+        now=now,
+        observed_at=observed_at,
+        source=source,
+    )
+
+
+def _provider_component(
+    service: AnalysisService,
+    now: datetime,
+    *,
+    name: str,
+    collector: object,
+    diagnostics_key: str,
+    readiness_name: str,
+    fallback: str,
+) -> ComponentHealth:
+    status, observed_at, source = _observed_status(
+        result=None,
+        diagnostics=_diagnostics(service, collector, diagnostics_key),
+        captured=_captured_status(service, diagnostics_key),
+        readiness=_readiness_row(service, readiness_name),
+    )
+    label = _provider_label(collector, fallback)
+    if status is None:
+        return _component(
+            name=name,
+            status=ModelHealthStatus.UNKNOWN,
+            detail="unobserved; " + label,
+            now=now,
+            observed_at=None,
+            source="unobserved",
+        )
+    return _component(
+        name=name,
+        status=_from_collection(status),
+        detail=_collection_detail(status, label),
+        now=now,
+        observed_at=observed_at,
+        source=source,
+    )
+
+
+def _external_health(service: AnalysisService, now: datetime) -> ComponentHealth:
+    external = service.last_external
+    if external is None:
+        return _component(
+            name="ExternalDataHealth",
+            status=ModelHealthStatus.UNKNOWN,
+            detail="unobserved; aggregated news/disclosure/macro",
+            now=now,
+            observed_at=None,
+            source="unobserved",
+        )
+    return _component(
+        name="ExternalDataHealth",
+        status=_from_collection(external.status),
+        detail=_collection_detail(external.status, "aggregated news/disclosure/macro"),
+        now=now,
+        observed_at=external.as_of,
+        source="process_last",
+    )
+
+
+def _scheduled_health(service: AnalysisService, now: datetime) -> ComponentHealth:
     name = service.scheduled.__class__.__name__
-    error = scheduled.error or ""
-    if "NOT_CONFIGURED" in error or name.startswith("Unconfigured"):
-        return ComponentHealth(
+    if name.startswith("Unconfigured"):
+        return _component(
             name="ScheduledHealth",
             status=ModelHealthStatus.UNKNOWN,
             detail=(
                 "NOT_CONFIGURED; optional live calendar; "
                 f"collector={name}; not NO_EVENT"
             ),
+            now=now,
+            observed_at=None,
+            source="not_configured",
         )
-    return ComponentHealth(
+    status, observed_at, source = _observed_status(
+        result=None,
+        diagnostics=_diagnostics(service, service.scheduled, "scheduled"),
+        captured=_captured_status(service, "scheduled"),
+        readiness=_readiness_row(service, "scheduledEvent"),
+    )
+    if status is None:
+        return _component(
+            name="ScheduledHealth",
+            status=ModelHealthStatus.UNKNOWN,
+            detail="unobserved; " + _provider_label(service.scheduled, "scheduled"),
+            now=now,
+            observed_at=None,
+            source="unobserved",
+        )
+    error = ""
+    row = _readiness_row(service, "scheduledEvent")
+    if row is not None and row.error:
+        error = row.error
+    if "NOT_CONFIGURED" in error:
+        return _component(
+            name="ScheduledHealth",
+            status=ModelHealthStatus.UNKNOWN,
+            detail=(
+                "NOT_CONFIGURED; optional live calendar; "
+                f"collector={name}; not NO_EVENT"
+            ),
+            now=now,
+            observed_at=observed_at,
+            source="not_configured",
+        )
+    return _component(
         name="ScheduledHealth",
-        status=_from_collection(scheduled.status),
-        detail=_collection_detail(scheduled.status, _provider_label(service.scheduled, "scheduled")),
+        status=_from_collection(status),
+        detail=_collection_detail(status, _provider_label(service.scheduled, "scheduled")),
+        now=now,
+        observed_at=observed_at,
+        source=source,
     )
 
 
-def _llm_health(service: AnalysisService) -> ComponentHealth:
+def _llm_health(service: AnalysisService, now: datetime) -> ComponentHealth:
     llm = getattr(service, "llm", None)
     if llm is None:
-        return ComponentHealth(
+        return _component(
             name="LlmHealth",
             status=ModelHealthStatus.UNKNOWN,
             detail="LLM provider not attached; UNKNOWN is not HEALTHY",
+            now=now,
+            observed_at=None,
+            source="unobserved",
         )
     diagnostics = getattr(llm, "last_diagnostics", None)
-    if diagnostics is None:
-        return ComponentHealth(
+    if not isinstance(diagnostics, ProviderDiagnostics):
+        return _component(
             name="LlmHealth",
             status=ModelHealthStatus.UNKNOWN,
             detail=f"attached={llm.__class__.__name__}; no call yet",
+            now=now,
+            observed_at=None,
+            source="unobserved",
         )
-    status = diagnostics.status if hasattr(diagnostics, "status") else CollectionStatus.DATA_UNAVAILABLE
-    return ComponentHealth(
+    return _component(
         name="LlmHealth",
-        status=_from_collection(status),
-        detail=_collection_detail(status, llm.__class__.__name__),
+        status=_from_collection(diagnostics.status),
+        detail=_collection_detail(diagnostics.status, llm.__class__.__name__),
+        now=now,
+        observed_at=diagnostics.received_at,
+        source="process_last",
+    )
+
+
+def _pipeline_health(service: AnalysisService) -> ComponentHealth:
+    if service.last_pipeline_error:
+        return ComponentHealth(
+            name="EventPipelineHealth",
+            status=ModelHealthStatus.UNHEALTHY,
+            detail=service.last_pipeline_error,
+            observation_source="process_last",
+        )
+    if service.last_market is None:
+        return ComponentHealth(
+            name="EventPipelineHealth",
+            status=ModelHealthStatus.UNKNOWN,
+            detail="event pipeline has not run in this process yet",
+            observation_source="unobserved",
+        )
+    return ComponentHealth(
+        name="EventPipelineHealth",
+        status=ModelHealthStatus.HEALTHY,
+        detail=(
+            "event intelligence pipeline last run succeeded; "
+            "process last evaluate, not a request-scoped decisionId"
+        ),
+        observation_source="process_last",
     )

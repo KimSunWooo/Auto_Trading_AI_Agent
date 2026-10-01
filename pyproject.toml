@@ -24,6 +24,7 @@ dev = [
 [project.scripts]
 ai-investment-agent = "ai_investment_agent.api.app:run"
 ai-observation-smoke = "ai_investment_agent.cli.observation_smoke:main"
+ai-dart-probe = "ai_investment_agent.cli.dart_probe:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
