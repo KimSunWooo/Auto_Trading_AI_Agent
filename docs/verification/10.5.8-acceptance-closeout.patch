@@ -1,0 +1,2253 @@
+From dd805eb6a28e9457f38f18216091763961a40349 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 06:18:55 +0000
+Subject: [PATCH 1/3] 10.5.8 acceptance: live cutoff, degraded merge, HTTP
+ deadline
+
+Live current observation (omitted as_of) uses a judgment cutoff at or
+after in-cycle receive times so collected rows are not dropped. Explicit
+past as_of still excludes later receives. Provider DEGRADED is not
+collapsed to OK. HTTP rejects responses that finish after the monotonic
+deadline. News IDs include source; DART pages are de-duplicated; mixed
+valid/corrupt market rows are DEGRADED.
+
+Co-authored-by: kssgss94 <kssgss94@gmail.com>
+---
+ README.md                                     |   2 +-
+ .../adapters/live/dart/__init__.py            |  23 +-
+ src/ai_investment_agent/adapters/live/http.py |   8 +
+ .../adapters/live/macro/__init__.py           |   9 +-
+ .../adapters/live/market/__init__.py          |  26 +-
+ .../adapters/live/market/parser.py            |  29 +-
+ .../adapters/live/news/__init__.py            |   4 +-
+ .../adapters/live/news/parser.py              |  19 +-
+ src/ai_investment_agent/analysis/clock.py     |  15 +-
+ src/ai_investment_agent/analysis/service.py   |  90 +++-
+ tests/test_live_acceptance_1058.py            | 457 ++++++++++++++++++
+ 11 files changed, 646 insertions(+), 36 deletions(-)
+ create mode 100644 tests/test_live_acceptance_1058.py
+
+diff --git a/README.md b/README.md
+index e12ab0b..d67a073 100644
+--- a/README.md
++++ b/README.md
+@@ -55,7 +55,7 @@
+ 
+ Runtime / Data Mode: `FIXTURE` · `REPLAY` · `LIVE_OBSERVATION` · `LIVE_SHADOW`. 기본 실행은 `FIXTURE`입니다. Profile이 없으면 LIVE로 간주하지 않습니다. Fixture fallback은 `FIXTURE`에서만 허용됩니다.
+ 
+-Live 기본 시계는 timezone-aware UTC now입니다. `as_of`는 분석 cutoff / 조회 창입니다. `sourceReceivedAt`은 실제 수신 시각이고, `generated_at`은 판단 생성 시각입니다. LIVE에서 과거 `as_of`는 cutoff로만 허용되며, 지금 받은 행을 과거에 수신한 것처럼 소급하지 않습니다.
++Live 기본 시계는 timezone-aware UTC now입니다. `as_of` 생략은 현재 관측이며, 판단 cutoff는 해당 사이클의 실제 수신 시각 이후입니다. 명시적 과거 `as_of`는 조회 창/cutoff이고 그 이후 수신 데이터는 소급하지 않습니다. 공급자 시각은 vendor 증거, `sourceReceivedAt`은 이 프로세스가 관측한 시각, `generated_at`은 판단 생성 시각입니다.
+ 
+ Live Observation capital은 `source=observation_config`이며 실제 계좌가 아닙니다.
+ 
+diff --git a/src/ai_investment_agent/adapters/live/dart/__init__.py b/src/ai_investment_agent/adapters/live/dart/__init__.py
+index 133a067..7808cc6 100644
+--- a/src/ai_investment_agent/adapters/live/dart/__init__.py
++++ b/src/ai_investment_agent/adapters/live/dart/__init__.py
+@@ -47,7 +47,12 @@ class LiveDisclosureCollector:
+         self._received_at = received_at_fn or (lambda: datetime.now(timezone.utc))
+         self.last_diagnostics: ProviderDiagnostics | None = None
+ 
+-    def collect(self, ticker: str, as_of: datetime) -> CollectionResult[IntelligenceRecord]:
++    def collect(
++        self,
++        ticker: str,
++        as_of: datetime,
++        include_current_receive: bool = False,
++    ) -> CollectionResult[IntelligenceRecord]:
+         requested_at = self._received_at()
+         api_key = self._client.config.api_key()
+         if not api_key and not self._client.config.base_url.startswith("https://example"):
+@@ -201,6 +206,19 @@ class LiveDisclosureCollector:
+                 incomplete_reason = "PAGINATION_INCOMPLETE: page cap reached"
+                 break
+ 
++        seen: set[str] = set()
++        unique_rows: list[object] = []
++        for row in list(merged.get("list") or []):
++            if not isinstance(row, dict):
++                continue
++            key = str(row.get("rcept_no") or "").strip()
++            if key and key in seen:
++                continue
++            if key:
++                seen.add(key)
++            unique_rows.append(row)
++        merged["list"] = unique_rows
++
+         try:
+             records, rejected = dart_list_to_records(
+                 merged,
+@@ -235,9 +253,10 @@ class LiveDisclosureCollector:
+                 freshness_class=FreshnessClass.DAILY,
+             )
+ 
++        access_as_of = received_at if include_current_receive else as_of
+         result = collect_accessible(
+             records,
+-            as_of=as_of,
++            as_of=access_as_of,
+             unavailable=False,
+             unavailable_reason="dart unavailable",
+             match=lambda record: record.ticker == ticker,
+diff --git a/src/ai_investment_agent/adapters/live/http.py b/src/ai_investment_agent/adapters/live/http.py
+index fb1fa97..9c86d7c 100644
+--- a/src/ai_investment_agent/adapters/live/http.py
++++ b/src/ai_investment_agent/adapters/live/http.py
+@@ -6,6 +6,8 @@ Timeout budget
+ --------------
+ ``total_seconds`` is a monotonic deadline covering rate-limit wait, backoff,
+ and transport. Remaining time is clamped onto connect/read timeouts.
++``UrlLibTransport`` cannot abort a socket that keeps delivering bytes after
++that deadline; a late completion is rejected and is not a circuit success.
+ Circuit failures are counted once per attempt (not once per raise site).
+ JSON is parsed before the attempt is treated as a circuit success.
+ """
+@@ -294,6 +296,12 @@ class ProviderHttpClient:
+                     connect_timeout=connect_timeout,
+                     read_timeout=read_timeout,
+                 )
++                if self.monotonic_fn() > deadline:
++                    raise ProviderHttpError(
++                        "deadline exceeded before response accepted",
++                        error_code="TIMEOUT",
++                        retryable=False,
++                    )
+                 if status in self.config.retry.no_retry_statuses:
+                     raise ProviderHttpError(
+                         f"HTTP {status}",
+diff --git a/src/ai_investment_agent/adapters/live/macro/__init__.py b/src/ai_investment_agent/adapters/live/macro/__init__.py
+index fe2f89f..1362127 100644
+--- a/src/ai_investment_agent/adapters/live/macro/__init__.py
++++ b/src/ai_investment_agent/adapters/live/macro/__init__.py
+@@ -35,7 +35,11 @@ class LiveMacroCollector:
+         self._received_at = received_at_fn or (lambda: datetime.now(timezone.utc))
+         self.last_diagnostics: ProviderDiagnostics | None = None
+ 
+-    def collect(self, as_of: datetime) -> CollectionResult[IntelligenceRecord]:
++    def collect(
++        self,
++        as_of: datetime,
++        include_current_receive: bool = False,
++    ) -> CollectionResult[IntelligenceRecord]:
+         requested_at = self._received_at()
+         if not self._client.config.base_url:
+             self.last_diagnostics = ProviderDiagnostics.unavailable(
+@@ -118,9 +122,10 @@ class LiveMacroCollector:
+             )
+             return CollectionResult.unavailable(error=f"macro parse failure: {exc}", as_of=as_of)
+ 
++        access_as_of = received_at if include_current_receive else as_of
+         result = collect_accessible(
+             records,
+-            as_of=as_of,
++            as_of=access_as_of,
+             unavailable=False,
+             unavailable_reason="macro unavailable",
+             match=lambda _record: True,
+diff --git a/src/ai_investment_agent/adapters/live/market/__init__.py b/src/ai_investment_agent/adapters/live/market/__init__.py
+index 37b595d..d41f09d 100644
+--- a/src/ai_investment_agent/adapters/live/market/__init__.py
++++ b/src/ai_investment_agent/adapters/live/market/__init__.py
+@@ -9,7 +9,7 @@ from ai_investment_agent.adapters.live.config import market_http_config
+ from ai_investment_agent.adapters.live.diagnostics import ProviderDiagnostics
+ from ai_investment_agent.adapters.live.errors import result_from_http_error
+ from ai_investment_agent.adapters.live.http import ProviderHttpClient, ProviderHttpError
+-from ai_investment_agent.adapters.live.market.parser import parse_market_payload
++from ai_investment_agent.adapters.live.market.parser import parse_market_document
+ from ai_investment_agent.collectors.query import collect_accessible
+ from ai_investment_agent.domain.collection import CollectionResult
+ from ai_investment_agent.domain.enums import CollectionStatus, MarketDataKind
+@@ -36,6 +36,7 @@ class LiveMarketDataCollector:
+         instrument: str,
+         as_of: datetime,
+         kinds: Sequence[MarketDataKind] | None = None,
++        include_current_receive: bool = False,
+     ) -> CollectionResult[MarketDataRecord]:
+         requested_at = datetime.now(timezone.utc)
+         try:
+@@ -101,11 +102,12 @@ class LiveMarketDataCollector:
+             )
+ 
+         try:
+-            records = parse_market_payload(
++            parsed = parse_market_document(
+                 payload,
+                 instrument=instrument,
+                 collected_at=received_at,
+             )
++            records = parsed.records
+         except (ValueError, KeyError, TypeError) as exc:
+             self.last_diagnostics = ProviderDiagnostics.unavailable(
+                 provider=PROVIDER,
+@@ -129,9 +131,10 @@ class LiveMarketDataCollector:
+                 return False
+             return True
+ 
++        access_as_of = received_at if include_current_receive else as_of
+         result = collect_accessible(
+             records,
+-            as_of=as_of,
++            as_of=access_as_of,
+             unavailable=False,
+             unavailable_reason="live market unavailable",
+             match=match,
+@@ -141,6 +144,13 @@ class LiveMarketDataCollector:
+             empty_status=CollectionStatus.DATA_UNAVAILABLE,
+             empty_error=f"No accessible live market data for {instrument}",
+         )
++        if parsed.skipped_incomplete and result.items:
++            result = CollectionResult.degraded(
++                list(result.items),
++                error=f"INCOMPLETE_RECORDS: skipped {parsed.skipped_incomplete} invalid market rows",
++                as_of=access_as_of,
++                stale_item_ids=result.stale_item_ids,
++            )
+         latency_ms = (received_at - requested_at).total_seconds() * 1000.0
+         if result.status is CollectionStatus.OK:
+             self.last_diagnostics = ProviderDiagnostics.ok(
+@@ -162,6 +172,16 @@ class LiveMarketDataCollector:
+                 error_code="STALE",
+                 error_message="market data older than freshness policy",
+             )
++        elif result.status is CollectionStatus.DEGRADED:
++            self.last_diagnostics = ProviderDiagnostics.degraded(
++                provider=PROVIDER,
++                error_code="INCOMPLETE_RECORDS",
++                error_message=result.error or "incomplete market rows",
++                requested_at=requested_at,
++                received_at=received_at,
++                latency_ms=latency_ms,
++                attempt_count=self._client.last_attempt_count,
++            )
+         else:
+             self.last_diagnostics = ProviderDiagnostics.unavailable(
+                 provider=PROVIDER,
+diff --git a/src/ai_investment_agent/adapters/live/market/parser.py b/src/ai_investment_agent/adapters/live/market/parser.py
+index e44446d..de7495a 100644
+--- a/src/ai_investment_agent/adapters/live/market/parser.py
++++ b/src/ai_investment_agent/adapters/live/market/parser.py
+@@ -5,6 +5,7 @@ Unsupported fields (1m/5m/VWAP/spread) stay None — never fabricated.
+ 
+ from __future__ import annotations
+ 
++from dataclasses import dataclass
+ from datetime import datetime, timedelta, timezone
+ from decimal import Decimal, InvalidOperation
+ from typing import Any
+@@ -80,12 +81,31 @@ def _point_timestamps(
+     )
+ 
+ 
++@dataclass
++class MarketParseOutcome:
++    records: list[MarketDataRecord]
++    skipped_incomplete: int
++
++
+ def parse_market_payload(
+     payload: dict[str, Any],
+     *,
+     instrument: str,
+     collected_at: datetime,
+ ) -> list[MarketDataRecord]:
++    return parse_market_document(
++        payload,
++        instrument=instrument,
++        collected_at=collected_at,
++    ).records
++
++
++def parse_market_document(
++    payload: dict[str, Any],
++    *,
++    instrument: str,
++    collected_at: datetime,
++) -> MarketParseOutcome:
+     """Build records from a read-only market JSON document.
+ 
+     Expected shape (all quote fields optional; missing stays absent):
+@@ -97,23 +117,28 @@ def parse_market_payload(
+     collected = _aware(collected_at)
+     currency = payload.get("currency") or "KRW"
+     records: list[MarketDataRecord] = []
++    skipped_incomplete = 0
+     ticker = str(payload.get("instrument") or instrument)
+ 
+     def add_scalar(kind: MarketDataKind, key: str) -> None:
++        nonlocal skipped_incomplete
+         raw = payload.get(key)
+         if raw is None:
+             return
+         if isinstance(raw, dict):
+             value = _decimal(raw.get("value"))
+             if value is None:
++                skipped_incomplete += 1
+                 return
+             if not _has_source_time(raw):
++                skipped_incomplete += 1
+                 return
+             ts = _point_timestamps(raw, collected_at=collected)
+             record_id = f"live_{kind.value.lower()}_{ticker}_{int(ts.tradable_at.timestamp())}"
+         else:
+             # Timestamp-less scalars cannot prove freshness. Skip rather than
+             # minting collected_at as a just-received quote.
++            skipped_incomplete += 1
+             return
+         records.append(
+             MarketDataRecord(
+@@ -140,6 +165,7 @@ def parse_market_payload(
+         bars = []
+     for index, bar in enumerate(bars):
+         if not isinstance(bar, dict):
++            skipped_incomplete += 1
+             continue
+         open_ = _decimal(bar.get("open"))
+         high = _decimal(bar.get("high"))
+@@ -147,6 +173,7 @@ def parse_market_payload(
+         close = _decimal(bar.get("close"))
+         volume = _decimal(bar.get("volume"))
+         if None in (open_, high, low, close, volume):
++            skipped_incomplete += 1
+             continue
+         bar_start = parse_required_dt(bar.get("barStart") or bar.get("bar_start"), "barStart")
+         bar_end = parse_required_dt(bar.get("barEnd") or bar.get("bar_end"), "barEnd")
+@@ -181,7 +208,7 @@ def parse_market_payload(
+             )
+         )
+ 
+-    return records
++    return MarketParseOutcome(records=records, skipped_incomplete=skipped_incomplete)
+ 
+ 
+ def default_daily_window(as_of: datetime, days: int = 180) -> tuple[str, str]:
+diff --git a/src/ai_investment_agent/adapters/live/news/__init__.py b/src/ai_investment_agent/adapters/live/news/__init__.py
+index 3891eca..f0a65ac 100644
+--- a/src/ai_investment_agent/adapters/live/news/__init__.py
++++ b/src/ai_investment_agent/adapters/live/news/__init__.py
+@@ -41,6 +41,7 @@ class LiveNewsCollector:
+         ticker: str | None,
+         as_of: datetime,
+         kinds: Sequence[IntelligenceKind] | None = None,
++        include_current_receive: bool = False,
+     ) -> CollectionResult[IntelligenceRecord]:
+         requested_at = self._received_at()
+         if not self._client.config.base_url:
+@@ -150,9 +151,10 @@ class LiveNewsCollector:
+                 return True
+             return record.ticker == ticker or record.ticker is None
+ 
++        access_as_of = received_at if include_current_receive else as_of
+         result = collect_accessible(
+             records,
+-            as_of=as_of,
++            as_of=access_as_of,
+             unavailable=False,
+             unavailable_reason="news unavailable",
+             match=match,
+diff --git a/src/ai_investment_agent/adapters/live/news/parser.py b/src/ai_investment_agent/adapters/live/news/parser.py
+index 38cf78d..1b1165f 100644
+--- a/src/ai_investment_agent/adapters/live/news/parser.py
++++ b/src/ai_investment_agent/adapters/live/news/parser.py
+@@ -35,8 +35,9 @@ def _kind(item: dict[str, Any]) -> IntelligenceKind:
+     return IntelligenceKind.FOREIGN_NEWS
+ 
+ 
+-def stable_news_record_id(source_id: str) -> str:
+-    digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:16]
++def stable_news_record_id(source_id: str, *, source: str = SOURCE) -> str:
++    material = f"{source}\0{source_id}"
++    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+     return f"news_{digest}"
+ 
+ 
+@@ -63,7 +64,7 @@ def parse_news_payload(
+ 
+     records: list[IntelligenceRecord] = []
+     skipped_incomplete = 0
+-    for index, item in enumerate(items):
++    for item in items:
+         if not isinstance(item, dict):
+             skipped_incomplete += 1
+             continue
+@@ -99,15 +100,21 @@ def parse_news_payload(
+             normalized_at=collected_ts,
+             tradable_at=tradable,
+         )
+-        source_id = str(item.get("id") or item.get("url") or "")
++        source_id = str(item.get("id") or item.get("url") or "").strip()
++        item_source = str(item.get("source") or SOURCE)
+         if not source_id:
+-            source_id = f"news_{index}:{headline}"
++            published_key = str(
++                item.get("publishedAt") or item.get("published_at") or item.get("pubDate") or ""
++            )
++            source_id = "|".join(
++                [headline, published_key, str(item.get("ticker") or ticker or "")]
++            )
+         item_ticker = item.get("ticker")
+         if item_ticker is None and ticker is not None:
+             item_ticker = ticker
+         records.append(
+             IntelligenceRecord(
+-                record_id=stable_news_record_id(source_id),
++                record_id=stable_news_record_id(source_id, source=item_source),
+                 kind=kind,
+                 headline=headline,
+                 timestamps=ts,
+diff --git a/src/ai_investment_agent/analysis/clock.py b/src/ai_investment_agent/analysis/clock.py
+index eb78caa..d048e9c 100644
+--- a/src/ai_investment_agent/analysis/clock.py
++++ b/src/ai_investment_agent/analysis/clock.py
+@@ -1,4 +1,17 @@
+-"""Analysis clocks. Live defaults to timezone-aware UTC now; FIXTURE stays pinned."""
++"""Analysis clocks. Live defaults to timezone-aware UTC now; FIXTURE stays pinned.
++
++Time roles (do not collapse these):
++- request_at: when evaluate starts a collection cycle
++- query as_of: provider query window / explicit historical cutoff
++- sourceReceivedAt: when this process actually observed the payload
++- judgment cutoff / analysis_as_of: accessibility horizon used for the decision
++- generated_at: when the TradeProposal is created
++
++Live current observation (as_of omitted) uses a cutoff at or after the
++last receive in the cycle so in-cycle data is usable. An explicit past
++as_of never sees rows received after that cutoff. Provider timestamps
++are evidence from the vendor; sourceReceivedAt is our observation clock.
++"""
+ 
+ from __future__ import annotations
+ 
+diff --git a/src/ai_investment_agent/analysis/service.py b/src/ai_investment_agent/analysis/service.py
+index 0f2054b..6c9b2de 100644
+--- a/src/ai_investment_agent/analysis/service.py
++++ b/src/ai_investment_agent/analysis/service.py
+@@ -2,10 +2,11 @@
+ 
+ from __future__ import annotations
+ 
++import inspect
+ from collections.abc import Callable
+ from datetime import datetime
+ from decimal import Decimal
+-from typing import Literal
++from typing import Any, Literal
+ 
+ from pydantic import Field
+ 
+@@ -176,10 +177,17 @@ class AnalysisService:
+         as_of: datetime | None = None,
+         capital_context: CapitalContext | None = None,
+     ) -> AnalysisResult:
+-        moment = as_of or self._now()
++        request_at = self._now()
++        query_as_of = as_of or request_at
++        include_current_receive = as_of is None and self.runtime.is_live_compatible
+         self.last_pipeline_error = None
+         try:
+-            return self._evaluate(ticker, moment, capital_context)
++            return self._evaluate(
++                ticker,
++                query_as_of,
++                capital_context,
++                include_current_receive=include_current_receive,
++            )
+         except Exception as exc:
+             self.last_pipeline_error = str(exc)
+             raise
+@@ -189,13 +197,40 @@ class AnalysisService:
+         ticker: str,
+         as_of: datetime,
+         capital_context: CapitalContext | None,
++        *,
++        include_current_receive: bool = False,
+     ) -> AnalysisResult:
+-        market = self.market.collect(ticker, as_of)
++        market = _collect(
++            self.market.collect,
++            ticker,
++            as_of,
++            include_current_receive=include_current_receive,
++        )
+         self.last_market = market
+-        news = self.news.collect(ticker, as_of)
+-        disclosure = self.disclosure.collect(ticker, as_of)
+-        macro = self.macro.collect(as_of)
+-        scheduled = self.scheduled.collect(as_of, ticker=ticker)
++        news = _collect(
++            self.news.collect,
++            ticker,
++            as_of,
++            include_current_receive=include_current_receive,
++        )
++        disclosure = _collect(
++            self.disclosure.collect,
++            ticker,
++            as_of,
++            include_current_receive=include_current_receive,
++        )
++        macro = _collect(
++            self.macro.collect,
++            as_of,
++            include_current_receive=include_current_receive,
++        )
++        scheduled = _collect(
++            self.scheduled.collect,
++            as_of,
++            include_current_receive=include_current_receive,
++            ticker=ticker,
++        )
++        judgment_as_of = self._now() if include_current_receive else as_of
+         providers = {
+             "news": news,
+             "disclosure": disclosure,
+@@ -210,21 +245,21 @@ class AnalysisService:
+         ]
+         external_status, external_error = merge_external_status(providers)
+         if external_status is CollectionStatus.OK:
+-            self.last_external = CollectionResult.ok(external_items, as_of=as_of)
++            self.last_external = CollectionResult.ok(external_items, as_of=judgment_as_of)
+         elif external_status is CollectionStatus.NO_EVENT:
+-            self.last_external = CollectionResult.no_event(as_of=as_of)
++            self.last_external = CollectionResult.no_event(as_of=judgment_as_of)
+         elif external_status is CollectionStatus.STALE:
+-            self.last_external = CollectionResult.stale(external_items, as_of=as_of)
++            self.last_external = CollectionResult.stale(external_items, as_of=judgment_as_of)
+         elif external_status is CollectionStatus.DEGRADED:
+             self.last_external = CollectionResult.degraded(
+                 external_items,
+                 error=external_error or "partial external provider outage",
+-                as_of=as_of,
++                as_of=judgment_as_of,
+             )
+         else:
+             self.last_external = CollectionResult.unavailable(
+                 error=external_error or "external intelligence unavailable",
+-                as_of=as_of,
++                as_of=judgment_as_of,
+             )
+ 
+         readiness = assess_readiness(
+@@ -239,7 +274,7 @@ class AnalysisService:
+         series = price_series_from(market.items)
+         snapshot = snapshot_from(
+             ticker,
+-            as_of,
++            judgment_as_of,
+             market.items,
+             source=(
+                 "live-market"
+@@ -249,14 +284,14 @@ class AnalysisService:
+         )
+         context = self.features.build(
+             ticker=ticker,
+-            as_of=as_of,
++            as_of=judgment_as_of,
+             series=series,
+             events=analyzed,
+             liquidity=_liquidity(market.items),
+         )
+         llm_assist = self._complete_llm_assist(
+             ticker=ticker,
+-            as_of=as_of,
++            as_of=judgment_as_of,
+             analyzed=analyzed,
+             context=context,
+         )
+@@ -463,6 +498,16 @@ def _liquidity(records: list[MarketDataRecord]) -> float | None:
+     return float(value)
+ 
+ 
++def _collect(method: Callable[..., Any], *args: Any, include_current_receive: bool, **kwargs: Any):
++    params = inspect.signature(method).parameters
++    accepts = "include_current_receive" in params or any(
++        item.kind is inspect.Parameter.VAR_KEYWORD for item in params.values()
++    )
++    if accepts:
++        return method(*args, include_current_receive=include_current_receive, **kwargs)
++    return method(*args, **kwargs)
++
++
+ def merge_external_status(
+     providers: dict[str, CollectionResult],
+ ) -> tuple[CollectionStatus, str | None]:
+@@ -479,22 +524,29 @@ def merge_external_status(
+         )
+     ]
+     stale = [name for name, status in statuses.items() if status is CollectionStatus.STALE]
++    degraded = [
++        name
++        for name, result in providers.items()
++        if result.status is CollectionStatus.DEGRADED
++    ]
+     ok_or_quiet = [
+         name
+         for name, status in statuses.items()
+         if status in {CollectionStatus.OK, CollectionStatus.NO_EVENT}
+     ]
+-    if unavailable and not has_items and not stale and not ok_or_quiet:
++    if unavailable and not has_items and not stale and not degraded and not ok_or_quiet:
+         return CollectionStatus.DATA_UNAVAILABLE, "external intelligence unavailable: " + ",".join(
+             unavailable
+         )
+-    if unavailable or stale:
+-        if ok_or_quiet or has_items:
++    if unavailable or stale or degraded:
++        if ok_or_quiet or has_items or degraded:
+             detail = []
+             if unavailable:
+                 detail.append("unavailable=" + ",".join(unavailable))
+             if stale:
+                 detail.append("stale=" + ",".join(stale))
++            if degraded:
++                detail.append("degraded=" + ",".join(degraded))
+             return CollectionStatus.DEGRADED, "partial external provider outage: " + " ".join(detail)
+         if stale:
+             return CollectionStatus.STALE, None
+diff --git a/tests/test_live_acceptance_1058.py b/tests/test_live_acceptance_1058.py
+new file mode 100644
+index 0000000..3712fc1
+--- /dev/null
++++ b/tests/test_live_acceptance_1058.py
+@@ -0,0 +1,457 @@
++"""10.5.8 acceptance: reproduce remaining defects with advancing clocks.
++
++These tests use existing public APIs. A new-import failure is not treated
++as proof of the original bug.
++"""
++
++from __future__ import annotations
++
++import json
++from datetime import datetime, timedelta, timezone
++import pytest
++
++from ai_investment_agent.adapters.live.config import (
++    CircuitBreakerConfig,
++    HttpTimeoutConfig,
++    ProviderHttpConfig,
++    RateLimitConfig,
++    RetryConfig,
++)
++from ai_investment_agent.adapters.live.dart import LiveDisclosureCollector
++from ai_investment_agent.adapters.live.factory import build_live_observation_service
++from ai_investment_agent.adapters.live.http import ProviderHttpClient, ProviderHttpError
++from ai_investment_agent.adapters.live.llm import LiveLlmProvider
++from ai_investment_agent.adapters.live.macro import LiveMacroCollector
++from ai_investment_agent.adapters.live.market import LiveMarketDataCollector
++from ai_investment_agent.adapters.live.news import LiveNewsCollector
++from ai_investment_agent.adapters.live.news.parser import parse_news_payload
++from ai_investment_agent.analysis.service import merge_external_status
++from ai_investment_agent.domain.collection import CollectionResult
++from ai_investment_agent.domain.enums import (
++    Action,
++    CollectionStatus,
++    KillSwitchLevel,
++    PolicyState,
++)
++from ai_investment_agent.ports.llm import LlmResponse
++from tests.horizon_support import bullish_long, good_entry, judge, weak_short
++from tests.test_live_observation import FakeTransport, _client, _llm_payload, _market_payload
++from tests.test_provider_framework import FakeTransport as SeqTransport
++from tests.test_provider_framework import _config
++
++
++T0 = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
++
++
++def _dart_row(rcept_no: str = "20260921000001", **extra: object) -> dict:
++    row = {
++        "corp_name": "삼성전자",
++        "corp_code": "00126380",
++        "stock_code": "005930",
++        "report_nm": "연결실적",
++        "rcept_no": rcept_no,
++        "rcept_dt": "20260921",
++    }
++    row.update(extra)
++    return row
++
++
++def test_live_current_observation_keeps_data_received_after_request_start(monkeypatch):
++    """as_of omitted: receive at t0+lag must still be usable. Do not pin receive==as_of."""
++    monkeypatch.setenv("DART_API_KEY", "dart-test-key-xxxxxxxx")
++    monkeypatch.setenv("DART_CORP_CODE_005930", "00126380")
++    monkeypatch.setenv("LLM_API_KEY", "sk-test-key-xxxxxxxxxxxx")
++    clock = {"now": T0}
++
++    def now() -> datetime:
++        return clock["now"]
++
++    def dart_received() -> datetime:
++        clock["now"] = T0 + timedelta(seconds=45)
++        return clock["now"]
++
++    dart_t = FakeTransport(
++        {"/list.json": (200, json.dumps({"status": "000", "list": [_dart_row()]}).encode())}
++    )
++    market_t = FakeTransport({"/market/": (200, json.dumps(_market_payload()).encode())})
++    macro_t = FakeTransport({"/macro": (200, json.dumps({"status": "NO_EVENT", "items": []}).encode())})
++    news_t = FakeTransport({"/news": (200, json.dumps({"status": "NO_EVENT", "articles": []}).encode())})
++    llm_t = FakeTransport({"/chat/completions": (200, _llm_payload())})
++    service = build_live_observation_service(
++        now_fn=now,
++        market=LiveMarketDataCollector(client=_client("market", "https://md.example", market_t)),
++        disclosure=LiveDisclosureCollector(
++            client=_client("dart", "https://example.test/api", dart_t, "DART_API_KEY"),
++            received_at_fn=dart_received,
++        ),
++        macro=LiveMacroCollector(
++            client=_client("macro", "https://macro.example", macro_t),
++            received_at_fn=lambda: T0 + timedelta(seconds=20),
++        ),
++        news=LiveNewsCollector(
++            client=_client("news", "https://news.example", news_t),
++            received_at_fn=lambda: T0 + timedelta(seconds=10),
++        ),
++    )
++    service.llm = LiveLlmProvider(client=_client("llm", "https://llm.example/v1", llm_t, "LLM_API_KEY"))
++    result = service.evaluate("005930")
++    disclosure = next(item for item in result.provider_health if item.name == "disclosure")
++    assert disclosure.status is CollectionStatus.OK
++    assert service.disclosure.last_diagnostics is not None
++    items = service.last_external.items if service.last_external else []
++    dart_items = [item for item in items if item.source == "opendart"]
++    assert dart_items, "live current observation dropped data received after t0"
++    assert dart_items[0].timestamps.source_received_at > T0
++    assert dart_items[0].timestamps.source_received_at <= result.snapshot.analysis_as_of
++    assert result.snapshot.created_at >= dart_items[0].timestamps.source_received_at
++
++
++def test_explicit_past_as_of_does_not_backdate_later_receive(monkeypatch):
++    monkeypatch.setenv("DART_API_KEY", "dart-test-key-xxxxxxxx")
++    monkeypatch.setenv("DART_CORP_CODE_005930", "00126380")
++    past = T0
++    receive = T0 + timedelta(hours=6)
++    collector = LiveDisclosureCollector(
++        client=_client(
++            "dart",
++            "https://example.test/api",
++            FakeTransport(
++                {"/list.json": (200, json.dumps({"status": "000", "list": [_dart_row()]}).encode())}
++            ),
++            "DART_API_KEY",
++        ),
++        received_at_fn=lambda: receive,
++    )
++    result = collector.collect("005930", past)
++    assert result.items == []
++    assert result.status is CollectionStatus.NO_EVENT
++
++
++def test_dart_degraded_is_not_merged_to_overall_ok():
++    as_of = T0
++    disclosure = CollectionResult.degraded(
++        [],
++        error="PAGINATION_INCOMPLETE: page 2 failed",
++        as_of=as_of,
++    )
++    quiet = CollectionResult.no_event(as_of=as_of)
++    status, error = merge_external_status(
++        {
++            "news": quiet,
++            "disclosure": disclosure,
++            "macro": quiet,
++            "scheduledEvent": CollectionResult.unavailable(
++                error="scheduledEvent NOT_CONFIGURED: live calendar provider is not configured",
++                as_of=as_of,
++            ),
++        }
++    )
++    assert status is CollectionStatus.DEGRADED
++    assert status is not CollectionStatus.OK
++    assert error is not None
++    assert "disclosure" in error or "PAGINATION" in error
++
++
++def test_deadline_elapsed_response_is_not_success():
++    clock = [0.0]
++
++    class LateTransport:
++        def request(self, method, url, *, headers, body, connect_timeout, read_timeout):
++            clock[0] += 5.0
++            return 200, b'{"ok":true}'
++
++    cfg = _config(
++        timeout=HttpTimeoutConfig(total_seconds=1.0, connect_seconds=5.0, read_seconds=5.0),
++        retry=RetryConfig(max_attempts=1),
++        rate_limit=RateLimitConfig(max_requests_per_second=0),
++    )
++    client = ProviderHttpClient(
++        config=cfg,
++        transport=LateTransport(),
++        monotonic_fn=lambda: clock[0],
++        sleep_fn=lambda _s: None,
++    )
++    with pytest.raises(ProviderHttpError) as exc:
++        client.get_json("/late")
++    assert exc.value.error_code == "TIMEOUT"
++    assert client.circuit.failures >= 1
++    assert not client.circuit.allow(clock[0]) or client.circuit.failures >= 1
++
++
++def test_news_ids_include_source_and_avoid_index_only_identity():
++    collected = T0
++    reuters = parse_news_payload(
++        {
++            "articles": [
++                {
++                    "id": "same-id",
++                    "title": "One",
++                    "publishedAt": "2026-09-21T07:00:00+00:00",
++                    "source": "reuters",
++                    "kind": "FOREIGN_NEWS",
++                    "ticker": "005930",
++                }
++            ]
++        },
++        ticker="005930",
++        collected_at=collected,
++    )
++    bloomberg = parse_news_payload(
++        {
++            "articles": [
++                {
++                    "id": "same-id",
++                    "title": "One",
++                    "publishedAt": "2026-09-21T07:00:00+00:00",
++                    "source": "bloomberg",
++                    "kind": "FOREIGN_NEWS",
++                    "ticker": "005930",
++                }
++            ]
++        },
++        ticker="005930",
++        collected_at=collected,
++    )
++    assert reuters[0].record_id != bloomberg[0].record_id
++
++    first = parse_news_payload(
++        {
++            "articles": [
++                {
++                    "title": "No id headline",
++                    "publishedAt": "2026-09-21T07:00:00+00:00",
++                    "source": "wire-a",
++                    "kind": "DOMESTIC_NEWS",
++                    "ticker": "005930",
++                }
++            ]
++        },
++        ticker="005930",
++        collected_at=collected,
++    )
++    reordered = parse_news_payload(
++        {
++            "articles": [
++                {
++                    "title": "Other",
++                    "publishedAt": "2026-09-21T06:00:00+00:00",
++                    "source": "wire-a",
++                    "kind": "DOMESTIC_NEWS",
++                    "ticker": "005930",
++                },
++                {
++                    "title": "No id headline",
++                    "publishedAt": "2026-09-21T07:00:00+00:00",
++                    "source": "wire-a",
++                    "kind": "DOMESTIC_NEWS",
++                    "ticker": "005930",
++                },
++            ]
++        },
++        ticker="005930",
++        collected_at=collected,
++    )
++    matching = [item for item in reordered if item.headline == "No id headline"]
++    assert matching
++    assert matching[0].record_id == first[0].record_id
++    assert "news_0:" not in first[0].record_id
++
++
++def test_mixed_valid_and_corrupt_ohlcv_is_degraded_not_ok():
++    payload = {
++        "instrument": "005930",
++        "currency": "KRW",
++        "currentPrice": {
++            "value": "71000",
++            "eventOccurredAt": "2026-09-21T08:59:30+00:00",
++            "sourceReceivedAt": "2026-09-21T08:59:31+00:00",
++            "tradableAt": "2026-09-21T08:59:31+00:00",
++        },
++        "dailyBars": [
++            {
++                "open": "1",
++                "high": "2",
++                "low": "0.5",
++                "close": "1.5",
++                "volume": "10",
++                "barStart": "2026-09-20T00:00:00+00:00",
++                "barEnd": "2026-09-20T06:00:00+00:00",
++                "eventOccurredAt": "2026-09-20T06:00:00+00:00",
++                "sourceReceivedAt": "2026-09-20T06:00:05+00:00",
++                "tradableAt": "2026-09-20T06:00:05+00:00",
++            },
++            {
++                "open": "1",
++                "high": "2",
++                "low": "0.5",
++                "close": "1.5",
++                "barStart": "2026-09-19T00:00:00+00:00",
++                "barEnd": "2026-09-19T06:00:00+00:00",
++            },
++        ],
++    }
++    collector = LiveMarketDataCollector(
++        client=ProviderHttpClient(
++            config=ProviderHttpConfig(
++                name="market",
++                base_url="https://md.example",
++                api_key_env=None,
++                timeout=HttpTimeoutConfig(total_seconds=5.0),
++                retry=RetryConfig(max_attempts=1),
++                rate_limit=RateLimitConfig(max_requests_per_second=100.0),
++                circuit=CircuitBreakerConfig(failure_threshold=5, cooldown_seconds=30.0),
++            ),
++            transport=FakeTransport({"/market/": (200, json.dumps(payload).encode())}),
++        )
++    )
++    result = collector.collect("005930", T0)
++    assert result.status is CollectionStatus.DEGRADED
++    assert result.items
++    assert result.status is not CollectionStatus.OK
++
++
++def test_llm_diagnostics_follow_the_latest_call_not_the_previous(monkeypatch):
++    monkeypatch.setenv("DART_API_KEY", "dart-test-key-xxxxxxxx")
++    monkeypatch.setenv("DART_CORP_CODE_005930", "00126380")
++    monkeypatch.setenv("LLM_API_KEY", "sk-test-key-xxxxxxxxxxxx")
++    class FlipTransport:
++        def __init__(self) -> None:
++            self.calls = 0
++
++        def request(self, method, url, *, headers, body, connect_timeout, read_timeout):
++            self.calls += 1
++            if self.calls == 1:
++                return 200, _llm_payload()
++            return 200, json.dumps(
++                {"model": "gpt-test", "choices": [{"message": {"content": "not-json{{{"}}]}
++            ).encode()
++
++    market_t = FakeTransport({"/market/": (200, json.dumps(_market_payload()).encode())})
++    dart_t = FakeTransport({"/list.json": (200, json.dumps({"status": "013", "list": []}).encode())})
++    macro_t = FakeTransport({"/macro": (200, json.dumps({"status": "NO_EVENT", "items": []}).encode())})
++    news_t = FakeTransport({"/news": (200, json.dumps({"status": "NO_EVENT", "articles": []}).encode())})
++    flip = FlipTransport()
++    service = build_live_observation_service(
++        now_fn=lambda: T0,
++        market=LiveMarketDataCollector(client=_client("market", "https://md.example", market_t)),
++        disclosure=LiveDisclosureCollector(
++            client=_client("dart", "https://example.test/api", dart_t, "DART_API_KEY"),
++            received_at_fn=lambda: T0,
++        ),
++        macro=LiveMacroCollector(
++            client=_client("macro", "https://macro.example", macro_t),
++            received_at_fn=lambda: T0,
++        ),
++        news=LiveNewsCollector(
++            client=_client("news", "https://news.example", news_t),
++            received_at_fn=lambda: T0,
++        ),
++    )
++    service.llm = LiveLlmProvider(client=_client("llm", "https://llm.example/v1", flip, "LLM_API_KEY"))
++    first = service.evaluate("005930", as_of=T0)
++    assert service.provider_diagnostics["llm"].status is CollectionStatus.OK
++    second = service.evaluate("005930", as_of=T0)
++    assert second.action is Action.NO_TRADE
++    assert service.provider_diagnostics["llm"].status is CollectionStatus.DATA_UNAVAILABLE
++    assert service.provider_diagnostics["llm"].error_code == "LLM_INVALID_JSON"
++    assert first.action is not None
++
++
++def test_llm_buy_cannot_bypass_kill_switch():
++    assist = LlmResponse(
++        content={
++            "desiredDecision": "LONG_TERM_BUY",
++            "rawConfidence": 0.99,
++            "suggestedCapitalPct": "40",
++            "llmStatus": "OK",
++            "promptVersion": "0.1.0-live",
++            "thesis": {
++                "headline": "Buy",
++                "summary": "LLM buy",
++                "bullCase": "x",
++                "bearCase": "y",
++                "timeHorizon": "LONG_TERM",
++            },
++        },
++        model_name="gpt-test",
++    )
++    snapshot = judge(
++        long_features=bullish_long(),
++        short_features=weak_short(),
++        entry=good_entry(),
++        kill_switch_level=KillSwitchLevel.LEVEL_1_NO_NEW_BUY,
++        policy_state=PolicyState.NORMAL,
++        llm_assist=assist,
++    )
++    assert snapshot.proposal.action is not Action.BUY
++
++
++def test_dart_duplicate_pages_do_not_duplicate_records(monkeypatch):
++    monkeypatch.setenv("DART_API_KEY", "dart-test-key-xxxxxxxx")
++    monkeypatch.setenv("DART_CORP_CODE_005930", "00126380")
++    page = {
++        "status": "000",
++        "total_page": 2,
++        "list": [_dart_row("20260921000001")],
++    }
++    transport = SeqTransport(
++        [
++            (200, json.dumps(page).encode()),
++            (200, json.dumps(page).encode()),
++        ]
++    )
++    collector = LiveDisclosureCollector(
++        client=ProviderHttpClient(
++            config=ProviderHttpConfig(
++                name="dart",
++                base_url="https://example.test/api",
++                api_key_env="DART_API_KEY",
++                timeout=HttpTimeoutConfig(total_seconds=5.0),
++                retry=RetryConfig(max_attempts=1),
++                rate_limit=RateLimitConfig(max_requests_per_second=100.0),
++                circuit=CircuitBreakerConfig(failure_threshold=5, cooldown_seconds=30.0),
++            ),
++            transport=transport,
++        ),
++        received_at_fn=lambda: T0 + timedelta(seconds=12),
++    )
++    result = collector.collect("005930", T0 + timedelta(seconds=12))
++    assert result.status is CollectionStatus.OK
++    ids = [item.record_id for item in result.items]
++    assert ids == list(dict.fromkeys(ids))
++
++
++def test_replay_restores_snapshot_without_live_calls(monkeypatch):
++    monkeypatch.setenv("DART_API_KEY", "dart-test-key-xxxxxxxx")
++    monkeypatch.setenv("DART_CORP_CODE_005930", "00126380")
++    monkeypatch.setenv("LLM_API_KEY", "sk-test-key-xxxxxxxxxxxx")
++    market_t = FakeTransport({"/market/": (200, json.dumps(_market_payload()).encode())})
++    dart_t = FakeTransport({"/list.json": (200, json.dumps({"status": "013", "list": []}).encode())})
++    macro_t = FakeTransport({"/macro": (200, json.dumps({"status": "NO_EVENT", "items": []}).encode())})
++    news_t = FakeTransport({"/news": (200, json.dumps({"status": "NO_EVENT", "articles": []}).encode())})
++    llm_t = FakeTransport({"/chat/completions": (200, _llm_payload())})
++    service = build_live_observation_service(
++        now_fn=lambda: T0,
++        market=LiveMarketDataCollector(client=_client("market", "https://md.example", market_t)),
++        disclosure=LiveDisclosureCollector(
++            client=_client("dart", "https://example.test/api", dart_t, "DART_API_KEY"),
++            received_at_fn=lambda: T0,
++        ),
++        macro=LiveMacroCollector(
++            client=_client("macro", "https://macro.example", macro_t),
++            received_at_fn=lambda: T0,
++        ),
++        news=LiveNewsCollector(
++            client=_client("news", "https://news.example", news_t),
++            received_at_fn=lambda: T0,
++        ),
++    )
++    service.llm = LiveLlmProvider(client=_client("llm", "https://llm.example/v1", llm_t, "LLM_API_KEY"))
++    result = service.evaluate("005930", as_of=T0)
++    calls_before = len(market_t.calls)
++    bundle = service.replay_decision(result.decision_id)
++    assert bundle.deterministic_rerun is False
++    assert "not re-executed" in bundle.restore_note.lower() or "not re-executed" in bundle.restore_note
++    assert len(market_t.calls) == calls_before
++    assert bundle.proposal.action is result.action
++    assert bundle.proposal.is_order is False if hasattr(bundle.proposal, "is_order") else True
+-- 
+2.43.0
+
+
+From dc99c9eb90c53a4fa7bf53b20029a0d699e9e861 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 06:42:08 +0000
+Subject: [PATCH 2/3] 10.5.8 closeout: live eventOccurredAt filter and
+ verification evidence
+
+Reject vendor future eventOccurredAt on Live collectors only, add
+barrier-interleaved evaluate isolation tests, and leave a secret-free
+acceptance closeout report plus provider runbook. Do not start live
+provider calls.
+
+Co-authored-by: kssgss94 <kssgss94@gmail.com>
+---
+ README.md                                     |   1 +
+ .../10.5.8-ACCEPTANCE-CLOSEOUT.md             | 327 +++++++++
+ docs/verification/redacted-evidence/README.md |  16 +
+ .../adapters/live/dart/__init__.py            |   1 +
+ .../adapters/live/macro/__init__.py           |   1 +
+ .../adapters/live/market/__init__.py          |   1 +
+ .../adapters/live/news/__init__.py            |   1 +
+ src/ai_investment_agent/collectors/query.py   |  17 +-
+ tests/test_live_acceptance_closeout.py        | 654 ++++++++++++++++++
+ 9 files changed, 1017 insertions(+), 2 deletions(-)
+ create mode 100644 docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md
+ create mode 100644 docs/verification/redacted-evidence/README.md
+ create mode 100644 tests/test_live_acceptance_closeout.py
+
+diff --git a/README.md b/README.md
+index d67a073..0cd78fa 100644
+--- a/README.md
++++ b/README.md
+@@ -38,6 +38,7 @@
+ | mocked contract/E2E 검증 완료 | `NO_NETWORK=1 pytest`가 Fake transport로 계약·파이프라인을 재현 | 예 |
+ | 실제 공급자 인증·응답 검증 완료 | 실자격증명 + 실네트워크로 스키마/회사 매핑/시각을 확인 | **실연결 미검증** |
+ | 장시간 관찰 검증 완료 | Live Shadow soak | **미실시** |
++| 10.5.8 수정본 인수 | cutoff/동시성 증거 + 수동 공급자 runbook | `docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md` (실연결 미검증) |
+ 
+ | Capability | Status |
+ | --- | --- |
+diff --git a/docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md b/docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md
+new file mode 100644
+index 0000000..dbbaf0a
+--- /dev/null
++++ b/docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md
+@@ -0,0 +1,327 @@
++# 10.5.8 acceptance 수정본 인수 마감
++
++최종 판정: **B) 수동 공급자 검증 준비 완료: 실제 연결은 미검증**
++
++실운영 준비 완료, ATS 연동 준비 완료로 확대하지 않는다. 실제 공급자 호출,
++유료 LLM 호출, Persistence, 장시간 Shadow, ATS/Broker 연동은 이 문서에서
++시작하지 않는다.
++
++## 1. 기준 및 변경
++
++| 항목 | 값 |
++| --- | --- |
++| 저장소 | 작업 트리 `/workspace` (GitHub `KimSunWooo/Auto_Trading_AI_Agent` 기준) |
++| 로컬 branch | `main` |
++| 이전 원격 `origin/main` | `ff61696dfba6df37a595c8d7a7ef25f84377c929` |
++| 보고된 6건 수정 커밋 | `dd805eb6a28e9457f38f18216091763961a40349` |
++| 이번 closeout 포함 로컬 HEAD | 이 파일을 포함한 후속 커밋의 `git rev-parse HEAD` |
++| working tree at review start | clean, `dd805eb` 이후 사용자 변경 없음 |
++| 원격 반영 | `dd805eb` 및 closeout은 원격에 없음. push는 재시도하지 않음 |
++| 해당 SHA의 원격 CI | **없음**. `ff61696` CI를 이번 수정 성공 증거로 사용하지 않음 |
++
++`ff61696..dd805eb` 변경 파일 (11):
++
++- `README.md`
++- `src/ai_investment_agent/adapters/live/dart/__init__.py`
++- `src/ai_investment_agent/adapters/live/http.py`
++- `src/ai_investment_agent/adapters/live/macro/__init__.py`
++- `src/ai_investment_agent/adapters/live/market/__init__.py`
++- `src/ai_investment_agent/adapters/live/market/parser.py`
++- `src/ai_investment_agent/adapters/live/news/__init__.py`
++- `src/ai_investment_agent/adapters/live/news/parser.py`
++- `src/ai_investment_agent/analysis/clock.py`
++- `src/ai_investment_agent/analysis/service.py`
++- `tests/test_live_acceptance_1058.py`
++
++secret-free patch: `docs/verification/10.5.8-acceptance-closeout.patch`
++
++인증 정보는 출력·우회하지 않았다.
++
++## 2. Live cutoff 양방향 검증
++
++### 구현 확인
++
++`include_current_receive`는 `as_of` 생략 + live-compatible 모드에서만 켜진다.
++각 live collector는 `access_as_of = received_at`으로 `collect_accessible`을
++호출한다. `datetime.max`로 바꾸거나 `is_accessible_at`을 건너뛰지 않는다.
++
++- 요청 시작 `t0`보다 늦은 정상 수신 `t1`은 현재 관측에 포함된다.
++- 공급자별 수신 시각이 달라도 journal / envelope / fingerprint의
++  `analysisAsOf`는 수집 이후 `judgment_as_of`와 같다.
++- `sourceReceivedAt` / `tradableAt`이 최종 cutoff보다 미래이면 제외된다.
++- 명시적 과거 `as_of`에는 이후 수신이 노출되지 않는다.
++- 전 공급자 실패에서도 cutoff와 `DATA_UNAVAILABLE` / `BLOCKED`가 일치한다.
++- FIXTURE `evaluate()`는 계속 `FIXTURE_AS_OF`를 쓴다. REPLAY는 snapshot
++  restore이며 live를 재호출하지 않는다.
++
++### 추가로 재현된 결함과 최소 수정
++
++재현: 공급자가 `eventOccurredAt=2099`를 주고 `sourceReceivedAt` /
++`tradableAt`만 현재이면, `is_accessible_at`이 `eventOccurredAt`을 보지
++않아 현재 관측에 포함됐다. in-cycle receive가 모든 시간 검증을 끈 것은
++아니지만, 잘못된 미래 발생 시각이 접근성 필터를 우회했다.
++
++최소 수정: `collect_accessible(..., reject_future_event_occurred=True)`를
++**Live collector만** 켠다. FIXTURE/REPLAY 기본값은 False라서 캘린더형
++미래 `eventOccurredAt` 경로는 그대로다.
++
++회귀: `tests/test_live_acceptance_closeout.py`
++
++## 3. 동시 요청 실행별 상태
++
++방법: `create_app(service)`의 **공유** `AnalysisService`에 대해
++`threading.Event`로 교차시킨다. sleep에 의존하지 않는다.
++
++교차 순서:
++
++1. 요청 A (`005930`) market 수집 성공 후 대기
++2. 요청 B (`000660`) market 실패로 `last_diagnostics` 기록
++3. A가 이어서 collect 반환
++4. B가 `_capture_provider_diagnostics`를 먼저 수행한 뒤 A가 수행
++
++결과: **응답은 교차하지 않았다.**
++
++| 항목 | A (005930) | B (000660) |
++| --- | --- | --- |
++| ticker | 005930 | 000660 |
++| market status | OK | DATA_UNAVAILABLE |
++| readiness | BLOCKED 아님 | BLOCKED + MARKET_DATA_UNAVAILABLE |
++| decisionId / envelope.proposalId / journal | 서로 다름, ticker 일치 | 서로 다름, ticker 일치 |
++| LLM thesis | 성공 payload ("Observation only") | fail-closed "LLM unavailable" |
++
++코드 변경 없음. “sync FastAPI + 단일 service = 직렬”로 단정하지 않았고,
++응답 경로(`evaluate` 로컬 `CollectionResult` / `readiness` / `llm_assist`)는
++실행별로 분리되어 있다.
++
++### health의 “최근 실행”
++
++`GET /health` → `collect_health`:
++
++- `last_market`가 있으면 그 결과를 쓰고, 없으면 `005930`을 다시 collect한다.
++- news / disclosure / macro / scheduled는 **항상 재수집**한다.
++- LLM은 `llm.last_diagnostics` (last-writer)를 읽는다.
++- `EventPipelineHealth`의 “last run succeeded”는 **프로세스 마지막
++  evaluate 성공**이지, 방금 본 HTTP 요청의 전용 핸들이 아니다.
++- `service.last_*`, `provider_diagnostics`, 각 collector `last_diagnostics`는
++  last-writer이며 요청 범위가 아니다.
++
++검증 범위: 공유 service의 `evaluate()` 두 스레드. uvicorn threadpool의
++실제 HTTP 동시성과 동일한 공유 객체를 쓰지만, 프로덕션 서버 부하 테스트는
++하지 않았다.
++
++## 4. 수정 6건 증거 연결
++
++기존 `tests/test_live_acceptance_1058.py`를 다시 쓰지 않았다.
++
++### 4.1 Live 현재 관측 cutoff
++
++- 재현: `as_of` 생략, DART 수신이 `t0+45s`. 이전 구현은 수신을 `t0`에
++  고정해 이후 수신을 버렸다.
++- 원인: live current의 접근 cutoff가 요청 시작과 같았음.
++- 수정: `analysis/service.py` `include_current_receive`; live collectors의
++  `access_as_of = received_at`; `judgment_as_of = now()` after collect.
++- 회귀: `test_live_current_observation_keeps_data_received_after_request_start`
++  + closeout `test_t1_after_t0_is_in_current_observation_and_matches_final_cutoff`
++
++### 4.2 DEGRADED 상태 병합
++
++- 재현: disclosure DEGRADED + 나머지 NO_EVENT/optional NOT_CONFIGURED →
++  전체가 OK로 승격.
++- 원인: `merge_external_status`가 부분 장애를 OK로 접음.
++- 수정: `analysis/service.py` `merge_external_status`가 DEGRADED를 보존.
++- 회귀: `test_dart_degraded_is_not_merged_to_overall_ok`
++
++### 4.3 deadline 이후 응답 거절
++
++- 재현: transport가 total deadline 이후 HTTP 200을 반환해도 성공 처리.
++- 원인: 응답 본문 도착만으로 circuit success.
++- 수정: `adapters/live/http.py` — monotonic deadline 이후 응답은
++  `TIMEOUT`, circuit failure.
++- 회귀: `test_deadline_elapsed_response_is_not_success`
++
++### 4.4 News ID 공급자 구분 및 index 의존 제거
++
++- 재현: 다른 source의 동일 vendor `id`가 같은 `record_id`; id 없는 기사가
++  배열 인덱스에 묶임.
++- 원인: `news_{source_id}` / `news_{index}:...`
++- 수정: `adapters/live/news/parser.py` `stable_news_record_id(source, source_id)`
++  (sha256 `source\0source_id`). 인덱스 경로 제거.
++- 회귀: `test_news_ids_include_source_and_avoid_index_only_identity`
++
++**News 수정·철회는 ID 충돌 수정만으로 완료가 아니다.** Live parser는
++`[CORRECTION]` / `[RETRACTION]` / `[RELATED:]` 태그를 body에 붙인다.
++클러스터 유지·`RETRACTED` 상태·삭제 거부는
++`tests/test_event_retraction.py`의 Event Intelligence `engine.retract`
++경로다. Live 기사 수정본이 기존 이벤트를 갱신하는지의 E2E는 이번
++closeout에서 완료로 보고하지 않는다.
++
++### 4.5 손상 OHLCV가 섞인 응답의 DEGRADED
++
++- 재현: volume 없는 bar를 skip한 뒤 나머지가 있으면 OK.
++- 원인: skip 카운트가 상태에 반영되지 않음.
++- 수정: `market/parser.py` `MarketParseOutcome.skipped_incomplete`;
++  collector가 유효 row가 남아도 DEGRADED.
++- 회귀: `test_mixed_valid_and_corrupt_ohlcv_is_degraded_not_ok`
++
++### 4.6 DART 페이지 중복 제거
++
++- 재현: 같은 `rcept_no`가 두 페이지에 있으면 레코드 중복.
++- 원인: 페이지 list를 그대로 concat.
++- 수정: `adapters/live/dart/__init__.py` `rcept_no` unique merge.
++- 회귀: `test_dart_duplicate_pages_do_not_duplicate_records`
++
++## 5. 공급자 수동 검증 runbook (실제 호출 금지 — 절차만)
++
++검증 대상 SHA는 이 보고서를 담은 로컬 HEAD (`git rev-parse HEAD`)이다.
++원격 main은 아직 `ff61696`이다.
++
++비밀은 이름만 기록한다. 값은 출력하지 않는다.
++
++공통 기록 항목 (매 공급자):
++
++- 전체 commit SHA
++- 공급자/adapter 이름
++- 사용한 환경 변수 **이름**
++- 요청 시작 / 수신 / 판단 cutoff (`analysisAsOf`)
++- collection status / error_code / readiness
++- `decisionId`, `dataMode`, `isOrder`
++- 기대 결과와 성공·실패 판정
++- 비밀 제거 증거 위치: `docs/verification/redacted-evidence/`
++
++### 존재하는 인터페이스 (없는 명령을 만들지 말 것)
++
++| 방법 | 역할 | 단독 공급자 검증? |
++| --- | --- | --- |
++| `python -m ai_investment_agent.cli.observation_smoke --ticker 005930` | 필수 공급자 일괄 evaluate | 아니오. market+disclosure+macro+news+llm |
++| `POST /analysis/evaluate` 또는 `POST /observation/evaluate` | 동일 파이프라인 | 아니오 |
++| `GET /health`, `GET /providers/health` | 프로세스 스냅샷 | 아니오. “최근 실행”은 위 3절 |
++| `NO_NETWORK=1 pytest` | mock/fault injection | 장애 시나리오는 여기만 |
++
++단독 collect CLI (`ai-market-ping` 등)는 **없다**. 문서에 없는 명령을
++적지 않는다.
++
++추가로 필요한 작은 작업 (미구현, 자동 시작하지 않음):
++
++- 공급자별 `collect()`만 호출하는 읽기 전용 inspect 헬퍼
++- 응답을 redacted JSON으로 저장하는 옵션
++- health를 request-scoped로 바꿀지는 이번 범위 밖
++
++### 공통 사전 조건
++
++- `AI_DATA_MODE=LIVE_OBSERVATION`
++- `NO_NETWORK` 미설정 (수동 실행 시). CI/`NO_NETWORK=1`에서는 smoke가
++  exit 2로 거부한다.
++- `.env`는 로컬만. 커밋 금지.
++- 기대 터미널 아티팩트: `TradeProposalEnvelope` v1, `isOrder=false`
++- scheduled는 optional. `NOT_CONFIGURED`를 연결 성공으로 위장하지 말 것.
++
++장애 재현은 기존 mock/fault injection만 사용한다. 실제 공급자에 고의
++인증 실패나 quota 초과를 유발하지 않는다.
++
++### Market — `LiveMarketDataCollector`
++
++- Adapter: `live-market`
++- Env 이름: `MARKET_DATA_BASE_URL`, `MARKET_DATA_API_KEY`(optional),
++  timeout/retry/RPS/circuit (`MARKET_DATA_*`)
++- 계약: `GET {MARKET_DATA_BASE_URL}/market/{instrument}?asOf=`
++- `BASE_URL`만 넣으면 완료가 아니다. 위 JSON 형태(instrument, timestamp가
++  있는 가격/OHLCV)가 아니면 전용 adapter가 필요하다.
++- 확인: instrument 일치, `currentPrice.value`, OHLCV 완전성,
++  `eventOccurredAt`/`sourceReceivedAt`/`tradableAt` ≤ cutoff,
++  volume 누락 bar는 0으로 채우지 않고 skip → 남으면 DEGRADED
++- 성공: status OK 또는 정당한 NO_EVENT/DEGRADED. `isOrder=false`
++- 실패: SCHEMA_INVALID, NO_ACCESSIBLE_DATA, TIMEOUT, HTTP_*
++- 기존 장애 테스트: `test_mixed_valid_and_corrupt_ohlcv_is_degraded_not_ok`
++
++### DART — `LiveDisclosureCollector` (OpenDART `list.json`)
++
++- Adapter: `opendart`
++- Env 이름: `DART_API_KEY`, `DART_BASE_URL`, `DART_CORP_CODE` 또는
++  `DART_CORP_CODE_<TICKER>`, `DART_*` timeout/retry
++- 확인: ticker↔corp_code 매핑 필수. 응답 `corp_code`/`stock_code` 일치.
++  페이지 `total_page` 완결. `rcept_no` 중복 없음.
++  `rcept_dt`는 날짜(UTC midnight), `sourceReceivedAt`은 실제 수신.
++- 성공: OK 또는 013 → NO_EVENT. COMPANY_MISMATCH / MISSING_CORP_CODE는 실패.
++- 페이지 실패는 DEGRADED(`PAGINATION_INCOMPLETE`). 전체 OK로 올리지 말 것.
++- 기존 장애 테스트: `tests/test_live_dart.py`, `test_dart_duplicate_pages_*`
++
++### Macro — `LiveMacroCollector`
++
++- Adapter: `live-macro`
++- Env 이름: `MACRO_BASE_URL`, `MACRO_API_KEY`(optional), `MACRO_*`
++- 계약: `GET {MACRO_BASE_URL}/macro?asOf=` vendor-neutral JSON
++  (`items`/`observations`/`list`). 공식 통계청/FRED 원본이 이 형태가
++  아니면 **전용 adapter 필요**. BASE_URL만으로 연결 완료가 아니다.
++- 빈 성공 피드 = NO_EVENT. 전송 실패 = DATA_UNAVAILABLE.
++- 기존 장애 테스트: `tests/test_live_macro.py`
++
++### News — `LiveNewsCollector`
++
++- Adapter: `live-news`
++- Env 이름: `NEWS_BASE_URL`, `NEWS_API_KEY`(optional), `NEWS_*`
++- 계약: `GET {NEWS_BASE_URL}/news?ticker=&asOf=`
++  (`articles`/`items`/`list`). Reuters/Bloomberg 원본 API는 이 계약이
++  아니면 전용 adapter 필요.
++- ID: `sha256(source + NUL + source_id)`. 수정/철회 태그는 4.4 주의.
++- 기존 장애 테스트: `tests/test_live_news.py`, news ID acceptance
++
++### LLM — `LiveLlmProvider`
++
++- Adapter: `live-llm`
++- Env 이름: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`,
++  `LLM_PROMPT_VERSION`, `LLM_*` timeout/retry
++- 계약: OpenAI-compatible `POST /chat/completions`, `response_format=json_object`
++- 실행 전 정할 항목: 호출 횟수 상한, 예상 토큰/비용, 모델, temperature,
++  실패 시 즉시 중단 여부. 이 closeout은 유료 호출을 시작하지 않는다.
++- 확인: 설정 모델이 응답 `model`/`modelVersion`에 남는지,
++  `promptVersion`이 content에 붙는지, 실패 시 fail-closed NO_TRADE.
++- health는 LLM을 호출하지 않는다 (`_complete_llm_assist`만).
++- 기존 장애 테스트: `test_llm_diagnostics_follow_the_latest_call_*`,
++  `tests/test_live_llm.py`
++
++### scheduled — `UnconfiguredScheduledEventCollector`
++
++- LIVE는 fixture 캘린더를 섞지 않는다. `SCHEDULED_USE_FIXTURE`는 무시.
++- 상태: `DATA_UNAVAILABLE` + `NOT_CONFIGURED`. NO_EVENT나 연결 성공이 아니다.
++- 단독 설정 인터페이스 없음. 그대로 기록한다.
++
++### 수동 실행 시 판정
++
++`observation_smoke` 분류:
++
++- exit 0: 필수 공급자 호출됨, 실패 아님. `HEALTHY_NO_TRADE`도 성공.
++- exit 1: 필수 공급자 실패/미설정/미호출
++- exit 2: `NO_NETWORK` 또는 mode 거부
++
++응답에서 `isOrder`가 true이거나 broker/ATS 필드가 켜지면 즉시 실패.
++
++## 6. 검증 명령
++
++코드가 변경됐으므로 closeout HEAD에서 다음을 실행한다.
++
++```bash
++NO_NETWORK=1 python3 -m pytest
++python3 -m ruff check src tests
++python3 -m compileall src/ai_investment_agent
++```
++
++유지 경계:
++
++- TradeProposalEnvelope v1 / `isOrder=false`
++- deterministic Capital / Policy / Kill switch
++- FIXTURE / REPLAY / safety / Shadow 기존 동작
++- 실제 주문 및 ATS 연결 없음
++
++## 7. 완료 보고 요약
++
++| 구분 | 내용 |
++| --- | --- |
++| 로컬 HEAD vs 원격 main | 로컬은 `dd805eb` + closeout. 원격 main은 `ff61696` |
++| 로컬 테스트 | 이 SHA에서 pytest / ruff / compileall (6절) |
++| 해당 SHA 원격 CI | 없음. 이전 커밋 CI를 증거로 쓰지 않음 |
++| 추가 재현 결함 | 미래 `eventOccurredAt` 접근성 우회 → Live-only reject |
++| 문제없는 경계 | in-cycle receive가 시간 검증 전체 비활성은 아님; 동시 evaluate 응답 격리; 6건 회귀; FIXTURE cutoff |
++| 미검증 | 실제 공급자/유료 LLM, Persistence, 장시간 Shadow, ATS/Broker, Live news revision E2E, uvicorn 실부하 |
++| patch / runbook | `docs/verification/10.5.8-acceptance-closeout.patch`, 이 파일 |
++
++판정: **B) 수동 공급자 검증 준비 완료: 실제 연결은 미검증**
+diff --git a/docs/verification/redacted-evidence/README.md b/docs/verification/redacted-evidence/README.md
+new file mode 100644
+index 0000000..938bb26
+--- /dev/null
++++ b/docs/verification/redacted-evidence/README.md
+@@ -0,0 +1,16 @@
++# Redacted evidence (no secrets)
++
++Store operator-captured screenshots or JSON dumps from a **manual**
++provider run here. This directory is a placeholder; do not commit API
++keys, bearer tokens, `crtfc_key` values, or raw `.env` files.
++
++Suggested filenames after a manual run (values redacted):
++
++- `evaluate-<ticker>-<utc>.json` — response with `decisionId`, `dataMode`,
++  `isOrder`, `analysisAsOf`, `providerHealth`, `readiness`
++- `providers-health-<utc>.json` — `GET /providers/health`
++- `smoke-<ticker>-<utc>.txt` — stdout of `ai-observation-smoke` after
++  secret masking
++
++Never paste `DART_API_KEY`, `LLM_API_KEY`, `MARKET_DATA_API_KEY`,
++`NEWS_API_KEY`, or `MACRO_API_KEY` values into these files.
+diff --git a/src/ai_investment_agent/adapters/live/dart/__init__.py b/src/ai_investment_agent/adapters/live/dart/__init__.py
+index 7808cc6..14feb69 100644
+--- a/src/ai_investment_agent/adapters/live/dart/__init__.py
++++ b/src/ai_investment_agent/adapters/live/dart/__init__.py
+@@ -264,6 +264,7 @@ class LiveDisclosureCollector:
+             freshness_of=lambda record: record.freshness_class,
+             id_of=lambda record: record.record_id,
+             empty_status=CollectionStatus.NO_EVENT,
++            reject_future_event_occurred=True,
+         )
+         if incomplete:
+             result = CollectionResult.degraded(
+diff --git a/src/ai_investment_agent/adapters/live/macro/__init__.py b/src/ai_investment_agent/adapters/live/macro/__init__.py
+index 1362127..45a4143 100644
+--- a/src/ai_investment_agent/adapters/live/macro/__init__.py
++++ b/src/ai_investment_agent/adapters/live/macro/__init__.py
+@@ -133,6 +133,7 @@ class LiveMacroCollector:
+             freshness_of=lambda record: record.freshness_class,
+             id_of=lambda record: record.record_id,
+             empty_status=CollectionStatus.NO_EVENT,
++            reject_future_event_occurred=True,
+         )
+         latency_ms = (received_at - requested_at).total_seconds() * 1000.0
+         if result.status is CollectionStatus.OK:
+diff --git a/src/ai_investment_agent/adapters/live/market/__init__.py b/src/ai_investment_agent/adapters/live/market/__init__.py
+index d41f09d..a684534 100644
+--- a/src/ai_investment_agent/adapters/live/market/__init__.py
++++ b/src/ai_investment_agent/adapters/live/market/__init__.py
+@@ -143,6 +143,7 @@ class LiveMarketDataCollector:
+             id_of=lambda record: record.record_id,
+             empty_status=CollectionStatus.DATA_UNAVAILABLE,
+             empty_error=f"No accessible live market data for {instrument}",
++            reject_future_event_occurred=True,
+         )
+         if parsed.skipped_incomplete and result.items:
+             result = CollectionResult.degraded(
+diff --git a/src/ai_investment_agent/adapters/live/news/__init__.py b/src/ai_investment_agent/adapters/live/news/__init__.py
+index f0a65ac..ca151e1 100644
+--- a/src/ai_investment_agent/adapters/live/news/__init__.py
++++ b/src/ai_investment_agent/adapters/live/news/__init__.py
+@@ -162,6 +162,7 @@ class LiveNewsCollector:
+             freshness_of=lambda record: record.freshness_class,
+             id_of=lambda record: record.record_id,
+             empty_status=CollectionStatus.NO_EVENT,
++            reject_future_event_occurred=True,
+         )
+         latency_ms = (received_at - requested_at).total_seconds() * 1000.0
+         if result.status is CollectionStatus.OK:
+diff --git a/src/ai_investment_agent/collectors/query.py b/src/ai_investment_agent/collectors/query.py
+index ea66e17..242ea40 100644
+--- a/src/ai_investment_agent/collectors/query.py
++++ b/src/ai_investment_agent/collectors/query.py
+@@ -27,8 +27,14 @@ def collect_accessible(
+     id_of: Callable[[T], str],
+     empty_status: CollectionStatus,
+     empty_error: str | None = None,
++    reject_future_event_occurred: bool = False,
+ ) -> CollectionResult[T]:
+-    """Shared collection query. Empty success is never returned as OK."""
++    """Shared collection query. Empty success is never returned as OK.
++
++    ``reject_future_event_occurred`` is Live-only. Fixture/replay calendar rows
++    may describe a future eventOccurredAt that was already published; those
++    collectors keep the default (False) so this flag does not change them.
++    """
+     if unavailable:
+         return CollectionResult.unavailable(error=unavailable_reason, as_of=as_of)
+ 
+@@ -36,7 +42,14 @@ def collect_accessible(
+     for record in records:
+         if not match(record):
+             continue
+-        if not is_accessible_at(timestamps_of(record), as_of):
++        timestamps = timestamps_of(record)
++        if not is_accessible_at(timestamps, as_of):
++            continue
++        if (
++            reject_future_event_occurred
++            and timestamps.event_occurred_at is not None
++            and timestamps.event_occurred_at > as_of
++        ):
+             continue
+         matched.append(record)
+ 
+diff --git a/tests/test_live_acceptance_closeout.py b/tests/test_live_acceptance_closeout.py
+new file mode 100644
+index 0000000..d1652b4
+--- /dev/null
++++ b/tests/test_live_acceptance_closeout.py
+@@ -0,0 +1,654 @@
++"""10.5.8 closeout: bidirectional live cutoff and concurrent evaluate isolation.
++
++Does not rewrite tests/test_live_acceptance_1058.py. Uses public APIs and
++barrier/event interleaving on the shared app service.
++"""
++
++from __future__ import annotations
++
++import json
++import threading
++from datetime import datetime, timedelta, timezone
++from typing import Mapping
++
++from ai_investment_agent.adapters.live.dart import LiveDisclosureCollector
++from ai_investment_agent.adapters.live.factory import build_live_observation_service
++from ai_investment_agent.adapters.live.llm import LiveLlmProvider
++from ai_investment_agent.adapters.live.macro import LiveMacroCollector
++from ai_investment_agent.adapters.live.market import LiveMarketDataCollector
++from ai_investment_agent.adapters.live.news import LiveNewsCollector
++from ai_investment_agent.analysis.clock import FIXTURE_AS_OF
++from ai_investment_agent.analysis.service import AnalysisService
++from ai_investment_agent.api.app import create_app
++from ai_investment_agent.domain.enums import (
++    CollectionStatus,
++    DataMode,
++    DecisionReadinessStatus,
++)
++from ai_investment_agent.health.report import collect_health
++from tests.test_live_acceptance_1058 import _dart_row
++from tests.test_live_observation import FakeTransport, _client, _llm_payload, _market_payload
++
++T0 = datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
++FUTURE = datetime(2099, 1, 1, 0, 0, tzinfo=timezone.utc)
++
++
++def _iso(value: datetime) -> str:
++    return value.isoformat()
++
++
++def _news_article(
++    *,
++    title: str,
++    published: datetime,
++    source_received: datetime | None = None,
++    tradable: datetime | None = None,
++    event_occurred: datetime | None = None,
++    source: str = "wire-a",
++    article_id: str = "n1",
++    ticker: str = "005930",
++) -> dict:
++    item = {
++        "id": article_id,
++        "title": title,
++        "publishedAt": _iso(published),
++        "source": source,
++        "kind": "DOMESTIC_NEWS",
++        "ticker": ticker,
++    }
++    if source_received is not None:
++        item["sourceReceivedAt"] = _iso(source_received)
++    if tradable is not None:
++        item["tradableAt"] = _iso(tradable)
++    if event_occurred is not None:
++        item["eventOccurredAt"] = _iso(event_occurred)
++    return item
++
++
++def _quiet_news_payload() -> bytes:
++    return json.dumps({"status": "NO_EVENT", "articles": []}).encode()
++
++
++def _quiet_macro_payload() -> bytes:
++    return json.dumps({"status": "NO_EVENT", "items": []}).encode()
++
++
++def _dart_ok_payload() -> bytes:
++    return json.dumps({"status": "000", "list": [_dart_row()]}).encode()
++
++
++def _dart_empty_payload() -> bytes:
++    return json.dumps({"status": "013", "list": []}).encode()
++
++
++def _fail_transport() -> FakeTransport:
++    return FakeTransport(
++        {
++            "/market/": (500, b'{"error":"fail"}'),
++            "/news": (500, b'{"error":"fail"}'),
++            "/macro": (500, b'{"error":"fail"}'),
++            "/list.json": (500, b'{"error":"fail"}'),
++            "/chat/completions": (500, b'{"error":"fail"}'),
++        }
++    )
++
++
++def _live_env(monkeypatch) -> None:
++    monkeypatch.setenv("DART_API_KEY", "dart-test-key-xxxxxxxx")
++    monkeypatch.setenv("DART_CORP_CODE_005930", "00126380")
++    monkeypatch.setenv("DART_CORP_CODE_000660", "00164779")
++    monkeypatch.setenv("LLM_API_KEY", "sk-test-key-xxxxxxxxxxxx")
++
++
++def _pin_market_clock(monkeypatch, clock: dict) -> None:
++    class _PinnedDateTime(datetime):
++        @classmethod
++        def now(cls, tz=None):
++            current = clock["now"]
++            if tz is None:
++                return current
++            return current.astimezone(tz)
++
++    monkeypatch.setattr(
++        "ai_investment_agent.adapters.live.market.datetime",
++        _PinnedDateTime,
++    )
++
++
++def test_in_cycle_receive_does_not_disable_accessibility_filter():
++    """include_current_receive uses received_at, not an unbounded cutoff."""
++    receive = T0 + timedelta(seconds=12)
++    collector = LiveNewsCollector(
++        client=_client(
++            "news",
++            "https://news.example",
++            FakeTransport(
++                {
++                    "/news": (
++                        200,
++                        json.dumps(
++                            {
++                                "articles": [
++                                    _news_article(
++                                        title="Vendor future timestamps",
++                                        published=T0 - timedelta(hours=2),
++                                        source_received=FUTURE,
++                                        tradable=FUTURE,
++                                        event_occurred=FUTURE,
++                                    )
++                                ]
++                            }
++                        ).encode(),
++                    )
++                }
++            ),
++        ),
++        received_at_fn=lambda: receive,
++    )
++    result = collector.collect("005930", T0, include_current_receive=True)
++    assert result.items == []
++    assert result.status is CollectionStatus.NO_EVENT
++
++
++def test_vendor_future_source_and_tradable_cannot_bypass_cutoff():
++    receive = T0 + timedelta(seconds=8)
++    payload = _market_payload()
++    payload["currentPrice"] = {
++        "value": "99999",
++        "eventOccurredAt": _iso(T0 - timedelta(minutes=1)),
++        "sourceReceivedAt": _iso(FUTURE),
++        "tradableAt": _iso(FUTURE),
++    }
++    collector = LiveMarketDataCollector(
++        client=_client(
++            "market",
++            "https://md.example",
++            FakeTransport({"/market/": (200, json.dumps(payload).encode())}),
++        )
++    )
++    result = collector.collect("005930", receive, include_current_receive=True)
++    prices = [item for item in result.items if item.kind.value == "CURRENT_PRICE"]
++    assert prices == []
++
++
++def test_vendor_future_event_occurred_at_does_not_enter_current_observation():
++    """A quote that claims to occur after the access cutoff is look-ahead."""
++    receive = T0 + timedelta(seconds=8)
++    payload = _market_payload()
++    payload["currentPrice"] = {
++        "value": "99999",
++        "eventOccurredAt": _iso(FUTURE),
++        "publishedAt": _iso(T0 - timedelta(minutes=1)),
++        "sourceReceivedAt": _iso(receive),
++        "tradableAt": _iso(receive),
++    }
++    collector = LiveMarketDataCollector(
++        client=_client(
++            "market",
++            "https://md.example",
++            FakeTransport({"/market/": (200, json.dumps(payload).encode())}),
++        )
++    )
++    result = collector.collect("005930", receive, include_current_receive=True)
++    prices = [item for item in result.items if item.kind.value == "CURRENT_PRICE"]
++    assert prices == [], "future eventOccurredAt bypassed the live accessibility filter"
++
++
++def test_t1_after_t0_is_in_current_observation_and_matches_final_cutoff(monkeypatch):
++    _live_env(monkeypatch)
++    clock = {"now": T0}
++
++    def now() -> datetime:
++        return clock["now"]
++
++    def dart_received() -> datetime:
++        clock["now"] = T0 + timedelta(seconds=45)
++        return clock["now"]
++
++    _pin_market_clock(monkeypatch, clock)
++    service = build_live_observation_service(
++        now_fn=now,
++        market=LiveMarketDataCollector(
++            client=_client(
++                "market",
++                "https://md.example",
++                FakeTransport({"/market/": (200, json.dumps(_market_payload()).encode())}),
++            )
++        ),
++        disclosure=LiveDisclosureCollector(
++            client=_client(
++                "dart",
++                "https://example.test/api",
++                FakeTransport({"/list.json": (200, _dart_ok_payload())}),
++                "DART_API_KEY",
++            ),
++            received_at_fn=dart_received,
++        ),
++        macro=LiveMacroCollector(
++            client=_client(
++                "macro",
++                "https://macro.example",
++                FakeTransport({"/macro": (200, _quiet_macro_payload())}),
++            ),
++            received_at_fn=lambda: T0 + timedelta(seconds=20),
++        ),
++        news=LiveNewsCollector(
++            client=_client(
++                "news",
++                "https://news.example",
++                FakeTransport(
++                    {
++                        "/news": (
++                            200,
++                            json.dumps(
++                                {
++                                    "articles": [
++                                        _news_article(
++                                            title="In-cycle news",
++                                            published=T0 - timedelta(minutes=5),
++                                            source_received=T0 + timedelta(seconds=10),
++                                        )
++                                    ]
++                                }
++                            ).encode(),
++                        )
++                    }
++                ),
++            ),
++            received_at_fn=lambda: T0 + timedelta(seconds=10),
++        ),
++    )
++    service.llm = LiveLlmProvider(
++        client=_client(
++            "llm",
++            "https://llm.example/v1",
++            FakeTransport({"/chat/completions": (200, _llm_payload())}),
++            "LLM_API_KEY",
++        )
++    )
++    result = service.evaluate("005930")
++    cutoff = result.snapshot.analysis_as_of
++    assert cutoff is not None
++    assert cutoff >= T0 + timedelta(seconds=45)
++    assert result.envelope is not None
++    assert result.envelope.analysis_as_of == cutoff
++    assert result.envelope.context_fingerprint == result.snapshot.context_fingerprint
++    assert result.envelope.is_order is False
++    assert result.record.decision_id == result.decision_id
++    assert result.record.timestamp == result.snapshot.created_at
++    items = service.last_external.items if service.last_external else []
++    dart_items = [item for item in items if item.source == "opendart"]
++    news_items = [item for item in items if item.headline == "In-cycle news"]
++    assert dart_items
++    assert news_items
++    for item in [*dart_items, *news_items]:
++        received = item.timestamps.source_received_at
++        assert received is not None
++        assert received > T0
++        assert received <= cutoff
++        assert item.timestamps.tradable_at <= cutoff
++        if item.timestamps.event_occurred_at is not None:
++            assert item.timestamps.event_occurred_at <= cutoff
++    assert service.last_external is not None
++    assert service.last_external.as_of == cutoff
++
++
++def test_explicit_past_as_of_still_hides_later_news_receive():
++    past = T0
++    receive = T0 + timedelta(hours=3)
++    collector = LiveNewsCollector(
++        client=_client(
++            "news",
++            "https://news.example",
++            FakeTransport(
++                {
++                    "/news": (
++                        200,
++                        json.dumps(
++                            {
++                                "articles": [
++                                    _news_article(
++                                        title="Arrived later",
++                                        published=T0 - timedelta(hours=1),
++                                        source_received=receive,
++                                    )
++                                ]
++                            }
++                        ).encode(),
++                    )
++                }
++            ),
++        ),
++        received_at_fn=lambda: receive,
++    )
++    result = collector.collect("005930", past, include_current_receive=False)
++    assert result.items == []
++    assert result.status is CollectionStatus.NO_EVENT
++
++
++def test_all_provider_failure_keeps_cutoff_and_failure_status(monkeypatch):
++    _live_env(monkeypatch)
++    clock = {"now": T0}
++
++    def now() -> datetime:
++        return clock["now"]
++
++    def bump() -> datetime:
++        clock["now"] = clock["now"] + timedelta(seconds=5)
++        return clock["now"]
++
++    fail = _fail_transport()
++    _pin_market_clock(monkeypatch, clock)
++    service = build_live_observation_service(
++        now_fn=now,
++        market=LiveMarketDataCollector(
++            client=_client("market", "https://md.example", fail)
++        ),
++        disclosure=LiveDisclosureCollector(
++            client=_client(
++                "dart",
++                "https://example.test/api",
++                fail,
++                "DART_API_KEY",
++            ),
++            received_at_fn=bump,
++        ),
++        macro=LiveMacroCollector(
++            client=_client("macro", "https://macro.example", fail),
++            received_at_fn=bump,
++        ),
++        news=LiveNewsCollector(
++            client=_client("news", "https://news.example", fail),
++            received_at_fn=bump,
++        ),
++    )
++    service.llm = LiveLlmProvider(
++        client=_client("llm", "https://llm.example/v1", fail, "LLM_API_KEY")
++    )
++    result = service.evaluate("005930")
++    cutoff = result.snapshot.analysis_as_of
++    assert cutoff is not None
++    assert cutoff >= T0
++    assert result.market_status is CollectionStatus.DATA_UNAVAILABLE
++    assert result.external_status is CollectionStatus.DATA_UNAVAILABLE
++    assert result.readiness is not None
++    assert result.readiness.status is DecisionReadinessStatus.BLOCKED
++    assert result.envelope is not None
++    assert result.envelope.analysis_as_of == cutoff
++    assert result.envelope.context_fingerprint == result.snapshot.context_fingerprint
++    assert result.envelope.is_order is False
++    assert service.last_external is not None
++    assert service.last_external.status is CollectionStatus.DATA_UNAVAILABLE
++    assert service.last_external.as_of == cutoff
++    names = {row.name: row.status for row in result.provider_health}
++    assert names["news"] is CollectionStatus.DATA_UNAVAILABLE
++    assert names["disclosure"] is CollectionStatus.DATA_UNAVAILABLE
++    assert names["macro"] is CollectionStatus.DATA_UNAVAILABLE
++
++
++def test_fixture_current_evaluate_keeps_pinned_cutoff():
++    service = AnalysisService()
++    result = service.evaluate("005930")
++    assert result.data_mode is DataMode.FIXTURE
++    assert result.snapshot.analysis_as_of == FIXTURE_AS_OF
++    assert result.envelope is not None
++    assert result.envelope.analysis_as_of == FIXTURE_AS_OF
++    assert result.envelope.is_order is False
++
++
++class _TickerMarket:
++    """Dispatch market collect by ticker and expose the last-writer diagnostics."""
++
++    def __init__(self, success: LiveMarketDataCollector, failure: LiveMarketDataCollector) -> None:
++        self._success = success
++        self._failure = failure
++        self.last_diagnostics = None
++
++    def collect(self, instrument, as_of, kinds=None, include_current_receive=False):
++        target = self._success if instrument == "005930" else self._failure
++        result = target.collect(
++            instrument,
++            as_of,
++            kinds=kinds,
++            include_current_receive=include_current_receive,
++        )
++        self.last_diagnostics = target.last_diagnostics
++        return result
++
++
++class _TickerLlmTransport:
++    def __init__(self) -> None:
++        self.calls: list[str] = []
++
++    def request(
++        self,
++        method: str,
++        url: str,
++        *,
++        headers: Mapping[str, str],
++        body: bytes | None,
++        connect_timeout: float,
++        read_timeout: float,
++    ) -> tuple[int, bytes]:
++        text = (body or b"").decode()
++        self.calls.append(text)
++        if '"000660"' in text or "000660" in text:
++            return 200, json.dumps(
++                {"model": "gpt-test", "choices": [{"message": {"content": "not-json{{{"}}]}
++            ).encode()
++        return 200, _llm_payload()
++
++
++def test_concurrent_evaluate_responses_stay_on_own_execution(monkeypatch):
++    """Cross collect-complete and diagnostics-write on the shared app service."""
++    _live_env(monkeypatch)
++    clock = {"now": T0}
++    _pin_market_clock(monkeypatch, clock)
++
++    market_ok = LiveMarketDataCollector(
++        client=_client(
++            "market",
++            "https://md.example",
++            FakeTransport({"/market/": (200, json.dumps(_market_payload()).encode())}),
++        )
++    )
++    market_fail = LiveMarketDataCollector(
++        client=_client(
++            "market-b",
++            "https://md.example",
++            FakeTransport({"/market/": (500, b'{"error":"ticker-b-fail"}')}),
++        )
++    )
++    a_collected = threading.Event()
++    b_diagnostics_written = threading.Event()
++    b_captured = threading.Event()
++
++    class InterleavedMarket(_TickerMarket):
++        def collect(self, instrument, as_of, kinds=None, include_current_receive=False):
++            if instrument == "005930":
++                result = self._success.collect(
++                    instrument,
++                    as_of,
++                    kinds=kinds,
++                    include_current_receive=include_current_receive,
++                )
++                self.last_diagnostics = self._success.last_diagnostics
++                a_collected.set()
++                assert b_diagnostics_written.wait(timeout=5), "B did not write market diagnostics"
++                return result
++            assert a_collected.wait(timeout=5), "A did not finish market collect"
++            result = self._failure.collect(
++                instrument,
++                as_of,
++                kinds=kinds,
++                include_current_receive=include_current_receive,
++            )
++            self.last_diagnostics = self._failure.last_diagnostics
++            b_diagnostics_written.set()
++            return result
++
++    quiet_news = LiveNewsCollector(
++        client=_client(
++            "news",
++            "https://news.example",
++            FakeTransport({"/news": (200, _quiet_news_payload())}),
++        ),
++        received_at_fn=lambda: T0,
++    )
++    quiet_macro = LiveMacroCollector(
++        client=_client(
++            "macro",
++            "https://macro.example",
++            FakeTransport({"/macro": (200, _quiet_macro_payload())}),
++        ),
++        received_at_fn=lambda: T0,
++    )
++    dart = LiveDisclosureCollector(
++        client=_client(
++            "dart",
++            "https://example.test/api",
++            FakeTransport({"/list.json": (200, _dart_empty_payload())}),
++            "DART_API_KEY",
++        ),
++        received_at_fn=lambda: T0,
++    )
++    llm_transport = _TickerLlmTransport()
++    service = build_live_observation_service(
++        now_fn=lambda: clock["now"],
++        market=InterleavedMarket(market_ok, market_fail),
++        disclosure=dart,
++        macro=quiet_macro,
++        news=quiet_news,
++    )
++    service.llm = LiveLlmProvider(
++        client=_client("llm", "https://llm.example/v1", llm_transport, "LLM_API_KEY")
++    )
++    original_capture = service._capture_provider_diagnostics
++
++    def interleaved_capture(news, disclosure, macro):
++        name = threading.current_thread().name
++        if name == "eval-A":
++            assert b_captured.wait(timeout=5), "B did not capture diagnostics first"
++        original_capture(news, disclosure, macro)
++        if name == "eval-B":
++            b_captured.set()
++
++    service._capture_provider_diagnostics = interleaved_capture
++    app = create_app(service)
++    assert app.state.analysis is service
++
++    results: dict[str, object] = {}
++    errors: dict[str, BaseException] = {}
++
++    def run_eval(label: str, ticker: str) -> None:
++        try:
++            results[label] = app.state.analysis.evaluate(ticker)
++        except BaseException as exc:
++            errors[label] = exc
++
++    thread_a = threading.Thread(target=run_eval, args=("A", "005930"), name="eval-A")
++    thread_b = threading.Thread(target=run_eval, args=("B", "000660"), name="eval-B")
++    thread_a.start()
++    thread_b.start()
++    thread_a.join(timeout=8)
++    thread_b.join(timeout=8)
++    assert not thread_a.is_alive() and not thread_b.is_alive()
++    assert errors == {}, errors
++
++    result_a = results["A"]
++    result_b = results["B"]
++    assert result_a.ticker == "005930"
++    assert result_b.ticker == "000660"
++    assert result_a.decision_id != result_b.decision_id
++    assert result_a.envelope is not None and result_b.envelope is not None
++    assert result_a.envelope.proposal_id == result_a.decision_id
++    assert result_b.envelope.proposal_id == result_b.decision_id
++    assert result_a.record.decision_id == result_a.decision_id
++    assert result_b.record.decision_id == result_b.decision_id
++    assert result_a.record.ticker == "005930"
++    assert result_b.record.ticker == "000660"
++    assert result_a.market_status is CollectionStatus.OK
++    assert result_b.market_status is CollectionStatus.DATA_UNAVAILABLE
++    assert result_a.readiness is not None and result_b.readiness is not None
++    assert result_a.readiness.status is not DecisionReadinessStatus.BLOCKED
++    assert result_b.readiness.status is DecisionReadinessStatus.BLOCKED
++    assert "MARKET_DATA_UNAVAILABLE" in result_b.readiness.reason_codes
++    assert "MARKET_DATA_UNAVAILABLE" not in result_a.readiness.reason_codes
++    assert result_a.envelope.is_order is False
++    assert result_b.envelope.is_order is False
++    thesis_a = result_a.envelope.thesis.headline
++    thesis_b = result_b.envelope.thesis.headline
++    assert thesis_a != "LLM unavailable"
++    assert thesis_b == "LLM unavailable"
++    stored = {item.decision_id: item for item in service.list_decisions()}
++    assert result_a.decision_id in stored
++    assert result_b.decision_id in stored
++    assert stored[result_a.decision_id].ticker == "005930"
++    assert stored[result_b.decision_id].ticker == "000660"
++
++    # Shared last_* / collector diagnostics / health are process-level last-writer,
++    # not request-scoped. They must not be read as "the request you just made".
++    assert service.last_market is not None
++    last_instruments = {item.instrument for item in service.last_market.items}
++    if service.last_market.items:
++        assert last_instruments <= {"005930", "000660"}
++    health = collect_health(service)
++    assert health.event_pipeline_health.detail == "event intelligence pipeline last run succeeded"
++    assert health.llm_health is not None
++
++
++def test_health_last_run_is_process_level_not_request_scoped(monkeypatch):
++    _live_env(monkeypatch)
++    service = build_live_observation_service(
++        now_fn=lambda: T0,
++        market=LiveMarketDataCollector(
++            client=_client(
++                "market",
++                "https://md.example",
++                FakeTransport({"/market/": (200, json.dumps(_market_payload()).encode())}),
++            )
++        ),
++        disclosure=LiveDisclosureCollector(
++            client=_client(
++                "dart",
++                "https://example.test/api",
++                FakeTransport({"/list.json": (200, _dart_empty_payload())}),
++                "DART_API_KEY",
++            ),
++            received_at_fn=lambda: T0,
++        ),
++        macro=LiveMacroCollector(
++            client=_client(
++                "macro",
++                "https://macro.example",
++                FakeTransport({"/macro": (200, _quiet_macro_payload())}),
++            ),
++            received_at_fn=lambda: T0,
++        ),
++        news=LiveNewsCollector(
++            client=_client(
++                "news",
++                "https://news.example",
++                FakeTransport({"/news": (200, _quiet_news_payload())}),
++            ),
++            received_at_fn=lambda: T0,
++        ),
++    )
++    service.llm = LiveLlmProvider(
++        client=_client(
++            "llm",
++            "https://llm.example/v1",
++            FakeTransport({"/chat/completions": (200, _llm_payload())}),
++            "LLM_API_KEY",
++        )
++    )
++    first = service.evaluate("005930", as_of=T0)
++    health = collect_health(service)
++    assert first.decision_id
++    assert service.last_market is not None
++    assert service.last_market.status is CollectionStatus.OK
++    assert health.event_pipeline_health.detail == "event intelligence pipeline last run succeeded"
++    # collect_health re-collects news/disclosure/macro/scheduled and uses
++    # last_market when present. That snapshot is process-level last-writer,
++    # not a per-request handle.
++    assert "has not run" not in health.event_pipeline_health.detail
+-- 
+2.43.0
+
+
+From 701b3a5e307c962baae328a6e0d0d8a194885135 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 1 Oct 2026 06:42:28 +0000
+Subject: [PATCH 3/3] Record 10.5.8 closeout verification SHA in the report
+
+Co-authored-by: kssgss94 <kssgss94@gmail.com>
+---
+ docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md b/docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md
+index dbbaf0a..14560ac 100644
+--- a/docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md
++++ b/docs/verification/10.5.8-ACCEPTANCE-CLOSEOUT.md
+@@ -14,7 +14,8 @@
+ | 로컬 branch | `main` |
+ | 이전 원격 `origin/main` | `ff61696dfba6df37a595c8d7a7ef25f84377c929` |
+ | 보고된 6건 수정 커밋 | `dd805eb6a28e9457f38f18216091763961a40349` |
+-| 이번 closeout 포함 로컬 HEAD | 이 파일을 포함한 후속 커밋의 `git rev-parse HEAD` |
++| closeout 코드·테스트·보고서 | `dc99c9eb90c53a4fa7bf53b20029a0d699e9e861` |
++| 이번 로컬 HEAD | patch 파일을 포함한 후속 커밋. 코드 검증 SHA는 위 `dc99c9eb` |
+ | working tree at review start | clean, `dd805eb` 이후 사용자 변경 없음 |
+ | 원격 반영 | `dd805eb` 및 closeout은 원격에 없음. push는 재시도하지 않음 |
+ | 해당 SHA의 원격 CI | **없음**. `ff61696` CI를 이번 수정 성공 증거로 사용하지 않음 |
+@@ -172,8 +173,8 @@ closeout에서 완료로 보고하지 않는다.
+ 
+ ## 5. 공급자 수동 검증 runbook (실제 호출 금지 — 절차만)
+ 
+-검증 대상 SHA는 이 보고서를 담은 로컬 HEAD (`git rev-parse HEAD`)이다.
+-원격 main은 아직 `ff61696`이다.
++검증 대상 코드 SHA는 `dc99c9eb90c53a4fa7bf53b20029a0d699e9e861`이다.
++원격 main은 아직 `ff61696dfba6df37a595c8d7a7ef25f84377c929`이다.
+ 
+ 비밀은 이름만 기록한다. 값은 출력하지 않는다.
+ 
+-- 
+2.43.0
+
